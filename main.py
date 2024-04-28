@@ -3,8 +3,7 @@ import re
 import sys
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk, filedialog
-from tkinter import messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 from urllib.request import *
 from urllib.error import *
 from bs4 import BeautifulSoup
@@ -59,6 +58,9 @@ if not os.path.exists(icons_directory):
 unchecked = Image.open(icons_directory / 'unchecked.png')
 checked = Image.open(icons_directory / 'checked.png')
 
+#style = ttk.Style()
+#style.configure('')
+
 
 def get_modrinth_page(url_name):
     page = urlopen(Request(f'https://modrinth.com/mod/{url_name}', headers=requestheader))
@@ -71,6 +73,8 @@ def get_mod_name(soup) -> str:
 
 def get_mod_icon(soup, name):
     img_tag = soup.find('img', class_='avatar')
+    if not os.path.exists(icons_directory / 'mods'):
+        os.mkdir(icons_directory / 'mods')
     urlretrieve(img_tag.get('src'), icons_directory / 'mods' / f'{name}.png')
     img_small = Image.open(icons_directory / 'mods' / f'{name}.png')
     img_small = img_small.resize((70, 70))
@@ -86,7 +90,8 @@ class App(tk.Tk):
         self.minsize(size[0], size[1])
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
-        self.iconphoto(True, tk.PhotoImage(icons_directory / 'icon.png'))
+        icon = tk.PhotoImage(file=icons_directory / 'icon.png')
+        self.wm_iconphoto(True, icon)
 
         self.modlist = []
 
@@ -104,7 +109,7 @@ class App(tk.Tk):
         self.mainloop()
 
     def update_heading(self, new_heading: str):
-        self.heading.delete(0, tk.END)
+        self.heading.delete(0, 'end')
         self.heading.insert(0, new_heading)
 
     def add_new_mod(self, url_name):
@@ -185,16 +190,32 @@ class Menu(tk.Menu):
         self.create_menus(master)
 
     def create_menus(self, master):
+        # file menu
         mnu_file = tk.Menu(self, tearoff=0)
-        mnu_file.add_command(label='New', command=lambda: new_list(master))
-        mnu_file.add_command(label='Open', command=lambda: open_list(master))
-        mnu_file.add_command(label='Save', command=lambda: save_list(master))
+        mnu_file.add_command(label='New List', command=lambda: new_list(master))
+        mnu_file.add_command(label='Open List', command=lambda: open_list(master))
+        mnu_file.add_command(label='Save List', command=lambda: save_list(master))
         mnu_file.add_separator()
         mnu_file.add_command(label='Quit', command=master.quit)
         self.add_cascade(label='File', menu=mnu_file)
 
+        # tools menu
+        mnu_tools = tk.Menu(self, tearoff=0)
+        mnu_tools.add_command(label='Add Mod', command=lambda: open_window(master))
+        mnu_tools.add_separator()
+        mnu_tools.add_command(label='Select All', command=lambda: menu_set_selection(master, False))
+        mnu_tools.add_command(label='Deselect All', command=lambda: menu_set_selection(master, True))
+        mnu_tools.add_command(label='Delete Selected', command=lambda: delete(master, True))
+        mnu_tools.add_separator()
+        mnu_tools.add_command(label='Find...', command=lambda: open_dialog(master))
+        mnu_sort = tk.Menu(self, tearoff=0)
+        mnu_sort.add_command(label='A to Z', command=lambda: menu_set_sort(master, 0))
+        mnu_sort.add_command(label='Z to A', command=lambda: menu_set_sort(master, 1))
+        mnu_tools.add_cascade(label='Sort', menu=mnu_sort)
+        self.add_cascade(label='Tools', menu=mnu_tools)
 
-class Heading(tk.Entry):
+
+class Heading(ttk.Entry):
     def __init__(self, master):
         super().__init__(master)
         self['font'] = ('Helvetica', 30)
@@ -226,7 +247,29 @@ def close_window(window, url: str):
         messagebox.showerror(title='Unknown URL Type', message=f'Input cannot be parsed as URL!\n{e}')
 
 
+def open_dialog(master):
+    master.tools.ent_find.delete(0, 'end')
+    master.tools.ent_find.insert(0, simpledialog.askstring(title='Input Text', prompt='Search for specific mods by name.'))
+    sort(master, master.tools.ent_find.get())
+
+
+def menu_set_selection(master, select_mode):
+    if len(master.modlist) == 0:
+        return
+    master.tools.change_select_all_text(select_mode)
+    update_selection(master, select_mode)
+    num_selected = count_selected(master)
+    master.tools.delete_change(master, num_selected)
+
+
+def menu_set_sort(master, cbx_index: int):
+    master.tools.cbx_sort.current(cbx_index)
+    sort(master, master.tools.cbx_sort.get())
+
+
 def width_configure(string) -> int:
+    if sys.platform == 'win32':
+        return len(string)
     return len(string) - 1
 
 
@@ -261,7 +304,26 @@ def count_selected(master) -> int:
     return num_selected
 
 
-class Tools(tk.Frame):
+def delete(master, select_mode):
+    if len(master.modlist) == 0:
+        return
+    # if selection is greater than 50% then ask for confirmation
+    if select_mode:
+        if not messagebox.askokcancel('Confirmation', 'Are you sure you want to delete?'):
+            return
+
+    for mod in master.modlist:
+        if mod.selected.get() == 1:
+            master.modlist.remove(mod)
+            mod.destroy()
+
+    if len(master.modlist) == 0:
+        num_selected = count_selected(master)
+        new_select_mode = master.tools.check_selection_mode(master, num_selected)
+        master.tools.change_select_all_text(new_select_mode)
+
+
+class Tools(ttk.Frame):
     def __init__(self, master):
         super().__init__(master)
         self['relief'] = 'raise'
@@ -272,30 +334,30 @@ class Tools(tk.Frame):
 
     def create_tools(self, master):
         # add tool
-        tk.Frame(self, width=10).pack(side='left', pady=5)
+        ttk.Frame(self, width=10).pack(side='left', pady=5)
         btn_add = ttk.Button(self, text='Add Mod', command=lambda: open_window(master))
         btn_add.pack(side='left', padx=10, pady=5)
 
         # find tool
-        ent_find = tk.Entry(self, width=10)
-        ent_find.insert(0, 'Find...')
-        ent_find.bind('<FocusIn>', lambda args: ent_find.get() == 'Find...' and ent_find.delete(0, 'end'))
-        ent_find.bind('<FocusOut>', lambda args: ent_find.get() == '' and ent_find.insert(0, 'Find...'))
-        ent_find.bind('<KeyRelease>', lambda args: find(master, ent_find.get()))
-        ent_find.bind('<Return>', lambda args: find_enter(master))
-        ent_find.pack(side='left', padx=10, pady=5)
+        self.ent_find = ttk.Entry(self, width=10)
+        self.ent_find.insert(0, 'Find...')
+        self.ent_find.bind('<FocusIn>', lambda args: self.ent_find.get() == 'Find...' and self.ent_find.delete(0, 'end'))
+        self.ent_find.bind('<FocusOut>', lambda args: self.ent_find.get() == '' and self.ent_find.insert(0, 'Find...'))
+        self.ent_find.bind('<KeyRelease>', lambda args: find(master, self.ent_find.get()))
+        self.ent_find.bind('<Return>', lambda args: find_enter(master))
+        self.ent_find.pack(side='left', padx=10, pady=5)
 
         # select all tool
         self.select_mode = False
         self.btn_selectall = ttk.Button(self, text='Select All')
-        self.btn_selectall.bind('<ButtonRelease>', lambda args: self.select_all(master))
+        self.btn_selectall.bind('<ButtonRelease>', lambda args: self.btn_select_all(master))
         self.btn_selectall.pack(side='left', padx=5, pady=5)
 
         # delete tool
         self.delete_show = False
 
         # sort tool
-        tk.Frame(self, width=10).pack(side='right', padx=5, pady=5)
+        ttk.Frame(self, width=10).pack(side='right', padx=5, pady=5)
         self.cbx_sort = ttk.Combobox(self, state='readonly', values=('A to Z', 'Z to A'))
         self.cbx_sort.current(0)
         self.cbx_sort['width'] = width_configure(max(self.cbx_sort.cget('values'), key=len))
@@ -304,37 +366,39 @@ class Tools(tk.Frame):
         lbl_sort = ttk.Label(self, text='Sort:')
         lbl_sort.pack(side='right', pady=5)
 
-    def update_selection(self, master):
-        num_selected = count_selected(master)
-
-        if num_selected / len(master.modlist) >= 0.5:
-            self.select_mode = True
-            return num_selected
-        self.select_mode = False
-        return num_selected
-
-    def select_all(self, master):
+    def check_selection_mode(self, master, num_selected: int):
         if len(master.modlist) == 0:
-            return
-
-        self.update_selection(master)
-
-        for mod in master.modlist:
-            if self.select_mode:
-                mod.selected.set(0)
+            self.select_mode = True
+        else:
+            if num_selected / len(master.modlist) >= 0.5:
+                self.select_mode = True
             else:
-                mod.selected.set(1)
+                self.select_mode = False
+        return self.select_mode
 
-        num_selected = count_selected(master)
-        self.delete_change(master, num_selected)
-
-        if self.select_mode:
+    def change_select_all_text(self, select_mode: bool):
+        if select_mode:
             self.btn_selectall['text'] = 'Select All'
         else:
             self.btn_selectall['text'] = 'Deselect All'
 
+    def btn_select_all(self, master):
+        if len(master.modlist) == 0:
+            return
+
+        num_selected = count_selected(master)
+        self.check_selection_mode(master, num_selected)
+
+        update_selection(master, self.select_mode)
+
+        num_selected = count_selected(master)
+        self.delete_change(master, num_selected)
+
+        self.change_select_all_text(self.select_mode)
+
     def select_change(self, master):
-        num_selected = self.update_selection(master)
+        num_selected = count_selected(master)
+        self.check_selection_mode(master, num_selected)
         self.delete_change(master, num_selected)
 
         if self.select_mode:
@@ -349,22 +413,19 @@ class Tools(tk.Frame):
             self.delete_show = False
         elif num_selected > 0:
             if not self.delete_show:
-                self.btn_delete = ttk.Button(self, text='Delete Mod', command=lambda: self.delete(master))
+                self.btn_delete = ttk.Button(self, text='Delete Mod', command=lambda: delete(master, self.select_mode))
                 self.delete_show = True
 
             self.btn_delete['text'] = 'Delete Mod' if num_selected == 1 else 'Delete Mods'
             self.btn_delete.pack(side='right', padx=10, pady=5)
 
-    def delete(self, master):
-        # if selection is greater than 50% then ask for confirmation
-        if self.select_mode:
-            if not messagebox.askokcancel('Confirmation', 'Are you sure you want to delete?'):
-                return
 
-        for mod in master.modlist:
-            if mod.selected.get() == 1:
-                master.modlist.remove(mod)
-                mod.destroy()
+def update_selection(master, select_mode):
+    for mod in master.modlist:
+        if select_mode:
+            mod.selected.set(0)
+        else:
+            mod.selected.set(1)
 
 
 def download(master, mcversion: str, modloader: str):
@@ -437,7 +498,7 @@ def download(master, mcversion: str, modloader: str):
             messagebox.showerror(title='URL Error', message=f'Modrinth page not found!\n{e}')
 
 
-class Footer(tk.Frame):
+class Footer(ttk.Frame):
     def __init__(self, master):
         super().__init__(master)
         self['relief'] = 'raise'
@@ -448,7 +509,7 @@ class Footer(tk.Frame):
 
     def create_widgets(self, master):
         # minecraft version filter
-        tk.Frame(self, width=10).pack(side='left', padx=5, pady=5)
+        ttk.Frame(self, width=10).pack(side='left', padx=5, pady=5)
         lbl_version = ttk.Label(self, text='Minecraft Version:')
         lbl_version.pack(side='left', pady=5)
         cbx_version = ttk.Combobox(self, state='readonly', values=mcversions)
@@ -457,7 +518,7 @@ class Footer(tk.Frame):
         cbx_version.pack(side='left', pady=5)
 
         # mod loader filter
-        tk.Frame(self, width=10).pack(side='left', padx=5, pady=5)
+        ttk.Frame(self, width=10).pack(side='left', padx=5, pady=5)
         lbl_loader = ttk.Label(self, text='Mod Loader:')
         lbl_loader.pack(side='left', pady=5)
         cbx_loader = ttk.Combobox(self, state='readonly', values=modloaders)
@@ -471,7 +532,7 @@ class Footer(tk.Frame):
         btn_download.pack(side='right', padx=5, pady=5)
 
 
-class Container(tk.Frame):
+class Container(ttk.Frame):
     def __init__(self, master):
         super().__init__(master)
         self.grid_columnconfigure(0, weight=1)
@@ -492,7 +553,7 @@ class Container(tk.Frame):
         self.scrollbar.grid(row=0, column=1, sticky='ns')
 
         # list
-        self.list = tk.Frame(self.canvas, bg='blue')
+        self.list = ttk.Frame(self.canvas)
         self.list.columnconfigure(0, weight=1)
         self.canvas_frame = self.canvas.create_window((0, 0), window=self.list, anchor='nw')
         self.list.bind('<Configure>', lambda args: self.canvas.configure(scrollregion=self.canvas.bbox('all')))
@@ -513,7 +574,7 @@ class Container(tk.Frame):
             self.canvas.yview_scroll(int(-1 * event.delta), 'units')
 
 
-class Mod(tk.Frame):
+class Mod(ttk.Frame):
     def __init__(self, master, name: str, url_name: str, row):
         super().__init__(master)
         self['relief'] = 'ridge'
@@ -532,7 +593,7 @@ class Mod(tk.Frame):
         self.img = Image.open(icons_directory / 'mods' / f'{self.name}.png')
         self.img = self.img.resize((70, 70))
         self.img = ImageTk.PhotoImage(self.img)
-        lbl_icon = tk.Label(self, image=self.img)
+        lbl_icon = ttk.Label(self, image=self.img)
         lbl_icon.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
 
         # mod name
