@@ -92,8 +92,10 @@ class App(tk.Tk):
         self.rowconfigure(2, weight=1)
         icon = tk.PhotoImage(file=icons_directory / 'icon.png')
         self.wm_iconphoto(True, icon)
+        self.protocol('WM_DELETE_WINDOW', self.on_exit)
 
         self.modlist = []
+        self.unsaved_changes = False
 
         # menu widget
         self.menu = Menu(self)
@@ -107,6 +109,16 @@ class App(tk.Tk):
 
         # run
         self.mainloop()
+
+    def on_exit(self):
+        if self.unsaved_changes:
+            exit_dialog = messagebox.askyesnocancel('Unsaved Changes', 'Do you want to save changes before continuing?')
+            if exit_dialog:
+                if not save_list(self):
+                    return
+            elif exit_dialog is None:
+                return
+        self.destroy()
 
     def update_heading(self, new_heading: str):
         self.heading.delete(0, 'end')
@@ -127,6 +139,8 @@ class App(tk.Tk):
         self.modlist.append(Mod(self.container.list, mod_name, url_name, len(self.modlist)))
         sort(self, self.tools.cbx_sort.get())
 
+        self.unsaved_changes = True
+
     def add_cached_mod(self, name, url_name):
         if not os.path.exists(icons_directory / 'mods' / f'{name}.png'):
             soup = get_modrinth_page(url_name)
@@ -139,11 +153,24 @@ class App(tk.Tk):
 
 
 def new_list(master):
+    if master.unsaved_changes:
+        exit_dialog = messagebox.askyesnocancel('Unsaved Changes', 'Do you want to save changes before continuing?')
+        if exit_dialog:
+            save_list(master)
+        elif exit_dialog is None:
+            return
     clear_list(master)
     master.update_heading('Untitled Modlist')
 
 
 def open_list(master):
+    if master.unsaved_changes:
+        exit_dialog = messagebox.askyesnocancel('Unsaved Changes', 'Do you want to save changes before continuing?')
+        if exit_dialog:
+            save_list(master)
+        elif exit_dialog is None:
+            return
+
     filepath = filedialog.askopenfilename(initialdir=modlists_directory, title='Open Modlist',
                                           filetypes=(('Text files', '*.txt'), ('All files', '*.*')))
     if not filepath:
@@ -170,7 +197,7 @@ def save_list(master):
     if master.heading.get() == 'Untitled Modlist':
         if not messagebox.askokcancel('Untitled Modlist', 'You haven\'t specified a title for the '
                                                           'modlist.\nDo you want to continue?'):
-            return
+            return False
 
     list_name = master.heading.get()
     if os.path.exists(modlists_directory / f'{list_name}.txt'):
@@ -182,6 +209,9 @@ def save_list(master):
         master.modlist.sort(key=lambda args: args.name)
         for mod in master.modlist:
             f.write(mod.name + ', ' + mod.url_name + '\n')
+
+    messagebox.showinfo('Save Complete', f'{list_name} Modlist successfully saved to {modlists_directory / f'{list_name}.txt'}!')
+    master.unsaved_changes = False
 
 
 class Menu(tk.Menu):
@@ -196,7 +226,7 @@ class Menu(tk.Menu):
         mnu_file.add_command(label='Open List', command=lambda: open_list(master))
         mnu_file.add_command(label='Save List', command=lambda: save_list(master))
         mnu_file.add_separator()
-        mnu_file.add_command(label='Quit', command=master.quit)
+        mnu_file.add_command(label='Quit', command=lambda: master.on_exit())
         self.add_cascade(label='File', menu=mnu_file)
 
         # tools menu
@@ -207,7 +237,7 @@ class Menu(tk.Menu):
         mnu_tools.add_command(label='Deselect All', command=lambda: menu_set_selection(master, True))
         mnu_tools.add_command(label='Delete Selected', command=lambda: delete(master, True))
         mnu_tools.add_separator()
-        mnu_tools.add_command(label='Find...', command=lambda: open_dialog(master))
+        mnu_tools.add_command(label='Find...', command=lambda: menu_set_find(master))
         mnu_sort = tk.Menu(self, tearoff=0)
         mnu_sort.add_command(label='A to Z', command=lambda: menu_set_sort(master, 0))
         mnu_sort.add_command(label='Z to A', command=lambda: menu_set_sort(master, 1))
@@ -247,10 +277,13 @@ def close_window(window, url: str):
         messagebox.showerror(title='Unknown URL Type', message=f'Input cannot be parsed as URL!\n{e}')
 
 
-def open_dialog(master):
+def menu_set_find(master):
+    dialog = simpledialog.askstring(title='Input Text', prompt='Search for specific mods by name.')
+    if dialog is None or dialog.strip() == '':
+        return
     master.tools.ent_find.delete(0, 'end')
-    master.tools.ent_find.insert(0, simpledialog.askstring(title='Input Text', prompt='Search for specific mods by name.'))
-    sort(master, master.tools.ent_find.get())
+    master.tools.ent_find.insert(0, dialog)
+    find(master, dialog)
 
 
 def menu_set_selection(master, select_mode):
@@ -321,6 +354,8 @@ def delete(master, select_mode):
         num_selected = count_selected(master)
         new_select_mode = master.tools.check_selection_mode(master, num_selected)
         master.tools.change_select_all_text(new_select_mode)
+
+    master.unsaved_changes = True
 
 
 class Tools(ttk.Frame):
@@ -449,33 +484,62 @@ def download(master, mcversion: str, modloader: str):
         messagebox.showinfo('Missing Mods Directory', 'Creating the mods directory ...')
         os.mkdir(mods_directory)
 
-    mods_directory = mods_directory / master.heading.get()
+    mods_directory = mods_directory / f'{master.heading.get()} [{modloader}] {mcversion}'
     if not os.path.exists(mods_directory):
         os.mkdir(mods_directory)
 
     list_mods = os.listdir(mods_directory)
+    first_version_marker = None
+    same_modloader_marker = None
 
     for mod in master.modlist:
         try:
             soup = get_modrinth_page(mod.url_name + '/versions?l=' + modloader.lower() + '&g=' + mcversion + '&c=release')
             desired_versions = soup.find_all('a', class_='download-button')
             if len(desired_versions) == 0:
-                available_version = soup.find_all('div', class_='featured-version')
-                for version in available_version:
+                available_versions = soup.find_all('div', class_='featured-version')
+                if len(available_versions) == 0:
+                    messagebox.showerror(title='Mod Download Unavailable', message='No available versions found of \'{mod.name}\' on modrinth.')
+                    return
+                for version in available_versions:
+                    # [0] is modloader and [1] is mcversion
                     version_info = version.find('div', class_='game-version').text.split(' ')
                     # Available mod version must be equal or older in mc version, inverted due to newest mc version
-                    # starting at index 0. Doesn't matter if mod version is different mod loader, for simplification.
-                    if mcversions.index(version_info[1]) > mcversions.index(mcversion):
-                        if version.find('span', class_='type--release'):
-                            version_name = version.find('a', class_='top')
-                            version_url = version_name['href']
-                            messagebox.showwarning(title='Mod Download Unavailable',
-                                                   message=f'No desired version found of \'{mod.name}\' on modrinth!'
-                                                           f'\n\nFound an available version:\nMod Loader: '
-                                                           f'{version_info[0]}\nMinecraft Version: {version_info[1]}'
-                                                           f'\n\nhttps://modrinth.com/mods{version_url}')
-                            return
-                continue
+                    # starting at index 0. If not, remove from list
+                    if mcversions.index(version_info[1]) > mcversions.index(mcversion) and version.find('span', class_='type--release'):
+
+                        if first_version_marker is None:
+                            first_version_marker = {'index': available_versions.index(version),
+                                                    'mcversion': version_info[1].lower(),
+                                                    'webscrap': version}
+
+                        if same_modloader_marker is None:
+                            if version_info[0].lower() == modloader.lower():
+                                same_modloader_marker = {'index': available_versions.index(version),
+                                                         'mcversion': version_info[1].lower(),
+                                                         'webscrap': version}
+
+                # If the same modloader version has a less than three mcversion difference from the first version, then
+                # the same modloader version is the best version, else first version is the best version.
+                best_available_version = None
+                if same_modloader_marker is not None:
+                    if abs(mcversions.index(same_modloader_marker['mcversion']) - mcversions.index(first_version_marker['mcversion'])) < 3:
+                        best_available_version = same_modloader_marker['webscrap']
+                    else:
+                        best_available_version = first_version_marker['mcversion']
+
+                # Get remaining information of the best available version
+                version_info = best_available_version.find('div', class_='game-version').text.split(' ')
+                if version_info[0].lower() == modloader.lower():
+                    version_name = best_available_version.find('a', class_='top')
+                    version_url = version_name['href']
+                    messagebox.showwarning(title='Mod Download Unavailable',
+                                           message=f'No desired version found of \'{mod.name}\' on modrinth!'
+                                                   f'\n\nFound an available version:\nMod Loader: '
+                                                   f'{version_info[0]}\nMinecraft Version: {version_info[1]}'
+                                                   f'\n\nhttps://modrinth.com/mods{version_url}')
+                return
+
             file_url = desired_versions[0]['href']
             file_version = desired_versions[0].find_next_sibling('div', class_='version__metadata').find_next('span', class_='version_number').text
             file_name = mod.name + ' ' + file_version + '.jar'
@@ -496,6 +560,8 @@ def download(master, mcversion: str, modloader: str):
 
         except URLError as e:
             messagebox.showerror(title='URL Error', message=f'Modrinth page not found!\n{e}')
+
+        messagebox.showinfo('Download Complete', f'Mods downloaded successfully into your minecraft mods directory!\nFiles can be found in {mods_directory}')
 
 
 class Footer(ttk.Frame):
@@ -641,6 +707,7 @@ class Window(tk.Toplevel):
         ent_url.bind('<FocusOut>',
                      lambda args: ent_url.get() == '' and ent_url.insert(0, 'Enter Modrinth URL for Mod...'))
         ent_url.bind('<Return>', lambda args: close_window(self, ent_url.get()))
+        ent_url.bind('<BackSpace>', lambda args: ent_url.delete(0, 'end'))
         ent_url.pack(side='left', padx=10, pady=5)
 
 
