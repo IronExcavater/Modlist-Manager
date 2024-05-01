@@ -4,11 +4,12 @@ import sys
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
+import sv_ttk
+import webbrowser
 from urllib.request import *
 from urllib.error import *
 from bs4 import BeautifulSoup
 from PIL import Image, ImageTk
-import webbrowser
 
 mcversions = (
     '1.20.5', '1.20.4', '1.20.3', '1.20.2', '1.20.1', '1.20',
@@ -55,12 +56,6 @@ if not os.path.exists(modlists_directory):
 if not os.path.exists(icons_directory):
     os.mkdir(icons_directory)
 
-unchecked = Image.open(icons_directory / 'unchecked.png')
-checked = Image.open(icons_directory / 'checked.png')
-
-#style = ttk.Style()
-#style.configure('')
-
 
 def get_modrinth_page(url_name):
     page = urlopen(Request(f'https://modrinth.com/mod/{url_name}', headers=requestheader))
@@ -90,9 +85,12 @@ class App(tk.Tk):
         self.minsize(size[0], size[1])
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
-        icon = tk.PhotoImage(file=icons_directory / 'icon.png')
-        self.wm_iconphoto(True, icon)
+        # icon = tk.PhotoImage(file=icons_directory / 'icon.png') TODO: Re-add the icon to the icons directory
+        # self.wm_iconphoto(True, icon)
         self.protocol('WM_DELETE_WINDOW', self.on_exit)
+
+        # theme styling
+        sv_ttk.set_theme('light')
 
         self.modlist = []
         self.unsaved_changes = False
@@ -210,7 +208,8 @@ def save_list(master):
         for mod in master.modlist:
             f.write(mod.name + ', ' + mod.url_name + '\n')
 
-    messagebox.showinfo('Save Complete', f'{list_name} Modlist successfully saved to {modlists_directory / f'{list_name}.txt'}!')
+    messagebox.showinfo('Save Complete',
+                        f'{list_name} Modlist successfully saved to {modlists_directory / f'{list_name}.txt'}!')
     master.unsaved_changes = False
 
 
@@ -251,7 +250,9 @@ class Heading(ttk.Entry):
         self['font'] = ('Helvetica', 30)
         self['justify'] = 'center'
         self.insert(0, 'Untitled Modlist')
-        self.grid(row=0, sticky='ew', padx=10, pady=5)
+        self.grid(row=0, sticky='ew', padx=10, pady=10)
+        self.bind('<FocusIn>', lambda args: self.get() == 'Untitled Modlist' and self.selection_range(0, tk.END))
+        self.bind('<FocusOut>', lambda args: self.selection_clear())
         self.bind('<Return>', lambda args: master.focus_set())
 
 
@@ -303,7 +304,7 @@ def menu_set_sort(master, cbx_index: int):
 def width_configure(string) -> int:
     if sys.platform == 'win32':
         return len(string)
-    return len(string) - 1
+    return len(string)
 
 
 def sort(master, sorting: str):
@@ -376,7 +377,8 @@ class Tools(ttk.Frame):
         # find tool
         self.ent_find = ttk.Entry(self, width=10)
         self.ent_find.insert(0, 'Find...')
-        self.ent_find.bind('<FocusIn>', lambda args: self.ent_find.get() == 'Find...' and self.ent_find.delete(0, 'end'))
+        self.ent_find.bind('<FocusIn>',
+                           lambda args: self.ent_find.get() == 'Find...' and self.ent_find.delete(0, 'end'))
         self.ent_find.bind('<FocusOut>', lambda args: self.ent_find.get() == '' and self.ent_find.insert(0, 'Find...'))
         self.ent_find.bind('<KeyRelease>', lambda args: find(master, self.ent_find.get()))
         self.ent_find.bind('<Return>', lambda args: find_enter(master))
@@ -399,7 +401,7 @@ class Tools(ttk.Frame):
         self.cbx_sort.bind('<<ComboboxSelected>>', lambda args: sort(master, self.cbx_sort.get()))
         self.cbx_sort.pack(side='right', pady=5)
         lbl_sort = ttk.Label(self, text='Sort:')
-        lbl_sort.pack(side='right', pady=5)
+        lbl_sort.pack(side='right', padx=10, pady=5)
 
     def check_selection_mode(self, master, num_selected: int):
         if len(master.modlist) == 0:
@@ -494,19 +496,22 @@ def download(master, mcversion: str, modloader: str):
 
     for mod in master.modlist:
         try:
-            soup = get_modrinth_page(mod.url_name + '/versions?l=' + modloader.lower() + '&g=' + mcversion + '&c=release')
+            soup = get_modrinth_page(
+                mod.url_name + '/versions?l=' + modloader.lower() + '&g=' + mcversion + '&c=release')
             desired_versions = soup.find_all('a', class_='download-button')
             if len(desired_versions) == 0:
                 available_versions = soup.find_all('div', class_='featured-version')
                 if len(available_versions) == 0:
-                    messagebox.showerror(title='Mod Download Unavailable', message='No available versions found of \'{mod.name}\' on modrinth.')
+                    messagebox.showerror(title='Mod Download Unavailable',
+                                         message='No available versions found of \'{mod.name}\' on modrinth.')
                     return
                 for version in available_versions:
                     # [0] is modloader and [1] is mcversion
                     version_info = version.find('div', class_='game-version').text.split(' ')
                     # Available mod version must be equal or older in mc version, inverted due to newest mc version
                     # starting at index 0. If not, remove from list
-                    if mcversions.index(version_info[1]) > mcversions.index(mcversion) and version.find('span', class_='type--release'):
+                    if mcversions.index(version_info[1]) > mcversions.index(mcversion) and version.find('span',
+                                                                                                        class_='type--release'):
 
                         if first_version_marker is None:
                             first_version_marker = {'index': available_versions.index(version),
@@ -523,7 +528,8 @@ def download(master, mcversion: str, modloader: str):
                 # the same modloader version is the best version, else first version is the best version.
                 best_available_version = None
                 if same_modloader_marker is not None:
-                    if abs(mcversions.index(same_modloader_marker['mcversion']) - mcversions.index(first_version_marker['mcversion'])) < 3:
+                    if abs(mcversions.index(same_modloader_marker['mcversion']) - mcversions.index(
+                            first_version_marker['mcversion'])) < 3:
                         best_available_version = same_modloader_marker['webscrap']
                     else:
                         best_available_version = first_version_marker['mcversion']
@@ -541,7 +547,8 @@ def download(master, mcversion: str, modloader: str):
                 return
 
             file_url = desired_versions[0]['href']
-            file_version = desired_versions[0].find_next_sibling('div', class_='version__metadata').find_next('span', class_='version_number').text
+            file_version = desired_versions[0].find_next_sibling('div', class_='version__metadata').find_next('span',
+                                                                                                              class_='version_number').text
             file_name = mod.name + ' ' + file_version + '.jar'
 
             same_mod = list(filter(lambda x: re.match(f'{mod.name}+', x), list_mods))
@@ -561,7 +568,8 @@ def download(master, mcversion: str, modloader: str):
         except URLError as e:
             messagebox.showerror(title='URL Error', message=f'Modrinth page not found!\n{e}')
 
-        messagebox.showinfo('Download Complete', f'Mods downloaded successfully into your minecraft mods directory!\nFiles can be found in {mods_directory}')
+        messagebox.showinfo('Download Complete',
+                            f'Mods downloaded successfully into your minecraft mods directory!\nFiles can be found in {mods_directory}')
 
 
 class Footer(ttk.Frame):
@@ -575,9 +583,9 @@ class Footer(ttk.Frame):
 
     def create_widgets(self, master):
         # minecraft version filter
-        ttk.Frame(self, width=10).pack(side='left', padx=5, pady=5)
+        ttk.Frame(self, width=10).pack(side='left', pady=5)
         lbl_version = ttk.Label(self, text='Minecraft Version:')
-        lbl_version.pack(side='left', pady=5)
+        lbl_version.pack(side='left', padx=10, pady=5)
         cbx_version = ttk.Combobox(self, state='readonly', values=mcversions)
         cbx_version.current(0)
         cbx_version['width'] = width_configure(max(cbx_version.cget('values'), key=len))
@@ -586,13 +594,14 @@ class Footer(ttk.Frame):
         # mod loader filter
         ttk.Frame(self, width=10).pack(side='left', padx=5, pady=5)
         lbl_loader = ttk.Label(self, text='Mod Loader:')
-        lbl_loader.pack(side='left', pady=5)
+        lbl_loader.pack(side='left', padx=10, pady=5)
         cbx_loader = ttk.Combobox(self, state='readonly', values=modloaders)
         cbx_loader.current(0)
         cbx_loader['width'] = width_configure(max(cbx_loader.cget('values'), key=len))
         cbx_loader.pack(side='left', pady=5)
 
         # download button
+        ttk.Frame(self, width=10).pack(side='right', padx=2, pady=5)
         btn_download = ttk.Button(self, text='DOWNLOAD',
                                   command=lambda: download(master, cbx_version.get(), cbx_loader.get()))
         btn_download.pack(side='right', padx=5, pady=5)
@@ -667,10 +676,7 @@ class Mod(ttk.Frame):
         lbl_name.grid(row=0, column=1, sticky='w', padx=30)
 
         # select button
-        self.unchecked = ImageTk.PhotoImage(unchecked)
-        self.checked = ImageTk.PhotoImage(checked)
-        chk_select = tk.Checkbutton(self, image=self.unchecked, selectimage=self.checked, indicatoron=False,
-                                    variable=self.selected, command=master.master.master.master.call_select_change)
+        chk_select = ttk.Checkbutton(self,variable=self.selected, command=master.master.master.master.call_select_change)
         chk_select.grid(row=0, column=2, sticky='e', padx=20)
 
 
@@ -697,10 +703,10 @@ class Window(tk.Toplevel):
 
     def create_widgets(self):
         # mod webview button
-        btn_webview = tk.Button(self, text='Open Modrinth', font=('Helvetica', 20), command=open_webview)
-        btn_webview.pack(side='left', padx=5, pady=5)
+        btn_webview = ttk.Button(self, text='Open Modrinth', command=open_webview)
+        btn_webview.pack(side='left', padx=20, pady=5)
         # mod url entry
-        ent_url = tk.Entry(self, width=100, font=('Helvetica', 20))
+        ent_url = ttk.Entry(self, width=100, font=('Helvetica', 20))
         ent_url.insert(0, 'Enter Modrinth URL for Mod...')
         ent_url.bind('<FocusIn>',
                      lambda args: ent_url.get() == 'Enter Modrinth URL for Mod...' and ent_url.delete(0, 'end'))
@@ -708,7 +714,7 @@ class Window(tk.Toplevel):
                      lambda args: ent_url.get() == '' and ent_url.insert(0, 'Enter Modrinth URL for Mod...'))
         ent_url.bind('<Return>', lambda args: close_window(self, ent_url.get()))
         ent_url.bind('<BackSpace>', lambda args: ent_url.delete(0, 'end'))
-        ent_url.pack(side='left', padx=10, pady=5)
+        ent_url.pack(side='left', pady=5)
 
 
 app = App('Modlist Manager', (700, 500))
