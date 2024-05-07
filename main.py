@@ -1,6 +1,7 @@
 import os
-import re
 import sys
+import re
+import time
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
@@ -85,8 +86,8 @@ class App(tk.Tk):
         self.minsize(size[0], size[1])
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
-        # icon = tk.PhotoImage(file=icons_directory / 'icon.png') TODO: Re-add the icon to the icons directory
-        # self.wm_iconphoto(True, icon)
+        icon = tk.PhotoImage(file=icons_directory / 'icon.png')
+        self.wm_iconphoto(True, icon)
         self.protocol('WM_DELETE_WINDOW', self.on_exit)
 
         # theme styling
@@ -243,6 +244,16 @@ class Menu(tk.Menu):
         mnu_tools.add_cascade(label='Sort', menu=mnu_sort)
         self.add_cascade(label='Tools', menu=mnu_tools)
 
+        # actions menu
+        mnu_actions = tk.Menu(self, tearoff=0)
+        mnu_actions.add_command(label='Download Modlist',
+                                command=lambda: download(master, master.footer.cbx_version.get(),
+                                                         master.footer.cbx_loader.get()))
+        mnu_actions.add_command(label='Check Compatibility',
+                                command=lambda: compatible(master, master.footer.cbx_version.get(),
+                                                           master.footer.cbx_loader.get()))
+        self.add_cascade(label='Actions', menu=mnu_actions)
+
 
 class Heading(ttk.Entry):
     def __init__(self, master):
@@ -302,8 +313,6 @@ def menu_set_sort(master, cbx_index: int):
 
 
 def width_configure(string) -> int:
-    if sys.platform == 'win32':
-        return len(string)
     return len(string)
 
 
@@ -371,22 +380,23 @@ class Tools(ttk.Frame):
     def create_tools(self, master):
         # add tool
         ttk.Frame(self, width=10).pack(side='left', pady=5)
-        btn_add = ttk.Button(self, text='Add Mod', command=lambda: open_window(master))
+        btn_add = ttk.Button(self, text='Add Mod', command=lambda: open_window(master), cursor='pointinghand')
         btn_add.pack(side='left', padx=10, pady=5)
 
         # find tool
-        self.ent_find = ttk.Entry(self, width=10)
+        self.ent_find = ttk.Entry(self, width=10, cursor='pointinghand')
         self.ent_find.insert(0, 'Find...')
         self.ent_find.bind('<FocusIn>',
                            lambda args: self.ent_find.get() == 'Find...' and self.ent_find.delete(0, 'end'))
-        self.ent_find.bind('<FocusOut>', lambda args: self.ent_find.get() == '' and self.ent_find.insert(0, 'Find...'))
+        self.ent_find.bind('<FocusOut>',
+                           lambda args: self.ent_find.get() == '' and self.ent_find.insert(0, 'Find...'))
         self.ent_find.bind('<KeyRelease>', lambda args: find(master, self.ent_find.get()))
         self.ent_find.bind('<Return>', lambda args: find_enter(master))
         self.ent_find.pack(side='left', padx=10, pady=5)
 
         # select all tool
         self.select_mode = False
-        self.btn_selectall = ttk.Button(self, text='Select All')
+        self.btn_selectall = ttk.Button(self, text='Select All', cursor='pointinghand')
         self.btn_selectall.bind('<ButtonRelease>', lambda args: self.btn_select_all(master))
         self.btn_selectall.pack(side='left', padx=5, pady=5)
 
@@ -395,10 +405,11 @@ class Tools(ttk.Frame):
 
         # sort tool
         ttk.Frame(self, width=10).pack(side='right', padx=5, pady=5)
-        self.cbx_sort = ttk.Combobox(self, state='readonly', values=('A to Z', 'Z to A'))
+        self.cbx_sort = ttk.Combobox(self, state='readonly', values=('A to Z', 'Z to A'), cursor='pointinghand')
         self.cbx_sort.current(0)
         self.cbx_sort['width'] = width_configure(max(self.cbx_sort.cget('values'), key=len))
         self.cbx_sort.bind('<<ComboboxSelected>>', lambda args: sort(master, self.cbx_sort.get()))
+        self.cbx_sort.bind('<FocusOut>', lambda args: self.selection_clear())
         self.cbx_sort.pack(side='right', pady=5)
         lbl_sort = ttk.Label(self, text='Sort:')
         lbl_sort.pack(side='right', padx=10, pady=5)
@@ -450,7 +461,8 @@ class Tools(ttk.Frame):
             self.delete_show = False
         elif num_selected > 0:
             if not self.delete_show:
-                self.btn_delete = ttk.Button(self, text='Delete Mod', command=lambda: delete(master, self.select_mode))
+                self.btn_delete = ttk.Button(self, text='Delete Mod', command=lambda: delete(master, self.select_mode),
+                                             cursor='pointinghand')
                 self.delete_show = True
 
             self.btn_delete['text'] = 'Delete Mod' if num_selected == 1 else 'Delete Mods'
@@ -465,10 +477,7 @@ def update_selection(master, select_mode):
             mod.selected.set(1)
 
 
-def download(master, mcversion: str, modloader: str):
-    if len(master.modlist) == 0:
-        return
-
+def get_mod_directory(master, mcversion: str, modloader: str):
     mods_directory = ''
     if sys.platform == 'win32':
         mods_directory = Path(os.environ['APPDATA']) / '.minecraft'
@@ -490,86 +499,127 @@ def download(master, mcversion: str, modloader: str):
     if not os.path.exists(mods_directory):
         os.mkdir(mods_directory)
 
-    list_mods = os.listdir(mods_directory)
+    return mods_directory
+
+
+def scrape_desired_version(soup):
+    desired_version = soup.find_all('a', class_='download-button')
+    return desired_version[0] if len(desired_version) > 0 else None
+
+
+def scrape_available_version(soup, mod, mcversion: str, modloader: str):
     first_version_marker = None
     same_modloader_marker = None
+
+    available_versions = soup.find_all('div', class_='featured-version')
+    if len(available_versions) == 0:
+        messagebox.showerror(title='Mod Download Unavailable',
+                             message='No available versions found of \'{mod.name}\' on modrinth.')
+        return
+
+    for version in available_versions:
+        # [0] is modloader and [1] is mcversion
+        version_info = version.findNext('div', class_='game-version').text
+        mcversion_info = str(re.match(r'(\d+)\.(\d+)\.(\d+)$', version_info))
+        print(mcversion_info)
+        # Available mod version must be equal or older in mc version, inverted due to newest mc version
+        # starting at index 0. If not, remove from list
+        if mcversions.index(mcversion_info) > mcversions.index(mcversion) and version.find('span',
+                                                                                           class_='type--release'):
+            if first_version_marker is None:
+                first_version_marker = {'mcversion': mcversion_info, 'webscrap': version}
+
+            if same_modloader_marker is None:
+                if re.match(modloader, version_info, re.IGNORECASE):
+                    same_modloader_marker = {'mcversion': mcversion_info, 'webscrap': version}
+
+    # If the same modloader version has a less than three mcversion difference from the first version, then
+    # the same modloader version is the best version, else first version is the best version.
+    if same_modloader_marker is not None and abs(mcversions.index(same_modloader_marker['mcversion'])
+                                                 - mcversions.index(first_version_marker['mcversion'])) < 3:
+        best_available_version = same_modloader_marker['webscrap']
+    else:
+        best_available_version = first_version_marker['webscrap']
+
+    # Get remaining information of the best available version
+    version_info = best_available_version.findNext('div', class_='game-version')
+    version_name = best_available_version.findNext('a', class_='top')
+    version_url = version_name['href']
+    messagebox.showwarning(title='Mod Download Unavailable',
+                           message=f'No desired version found of \'{mod.name}\' on modrinth!'
+                                   f'\n\nFound an available version:\n{version_info}'
+                                   f'\n\nhttps://modrinth.com/mods{version_url}')
+
+
+def download_file(desired_version, mod, mods_directory):
+    list_mods = os.listdir(mods_directory)
+    file_url = desired_version['href']
+    file_version = (desired_version.findNextSibling('div', class_='version__metadata')
+                    .findNext('span', class_='version_number').text)
+    file_name = mod.name + ' ' + file_version + '.jar'
+
+    same_mods = list(filter(lambda x: re.match(f'{mod.name}+', x), list_mods))
+    first_duplicate = True
+    for mod in same_mods:
+        if mod == file_name:
+            if first_duplicate:
+                first_duplicate = False
+                continue
+            else:
+                os.remove(mods_directory / mod)
+        else:
+            os.remove(mods_directory / mod)
+
+    urlretrieve(file_url, mods_directory / file_name)
+
+
+def compatible(master, mcversion: str, modloader: str):
+    if len(master.modlist) == 0:
+        return
+
+    incompatible_mods = []
 
     for mod in master.modlist:
         try:
             soup = get_modrinth_page(
-                mod.url_name + '/versions?l=' + modloader.lower() + '&g=' + mcversion + '&c=release')
-            desired_versions = soup.find_all('a', class_='download-button')
-            if len(desired_versions) == 0:
-                available_versions = soup.find_all('div', class_='featured-version')
-                if len(available_versions) == 0:
-                    messagebox.showerror(title='Mod Download Unavailable',
-                                         message='No available versions found of \'{mod.name}\' on modrinth.')
-                    return
-                for version in available_versions:
-                    # [0] is modloader and [1] is mcversion
-                    version_info = version.find('div', class_='game-version').text.split(' ')
-                    # Available mod version must be equal or older in mc version, inverted due to newest mc version
-                    # starting at index 0. If not, remove from list
-                    if mcversions.index(version_info[1]) > mcversions.index(mcversion) and version.find('span',
-                                                                                                        class_='type--release'):
-
-                        if first_version_marker is None:
-                            first_version_marker = {'index': available_versions.index(version),
-                                                    'mcversion': version_info[1].lower(),
-                                                    'webscrap': version}
-
-                        if same_modloader_marker is None:
-                            if version_info[0].lower() == modloader.lower():
-                                same_modloader_marker = {'index': available_versions.index(version),
-                                                         'mcversion': version_info[1].lower(),
-                                                         'webscrap': version}
-
-                # If the same modloader version has a less than three mcversion difference from the first version, then
-                # the same modloader version is the best version, else first version is the best version.
-                best_available_version = None
-                if same_modloader_marker is not None:
-                    if abs(mcversions.index(same_modloader_marker['mcversion']) - mcversions.index(
-                            first_version_marker['mcversion'])) < 3:
-                        best_available_version = same_modloader_marker['webscrap']
-                    else:
-                        best_available_version = first_version_marker['mcversion']
-
-                # Get remaining information of the best available version
-                version_info = best_available_version.find('div', class_='game-version').text.split(' ')
-                if version_info[0].lower() == modloader.lower():
-                    version_name = best_available_version.find('a', class_='top')
-                    version_url = version_name['href']
-                    messagebox.showwarning(title='Mod Download Unavailable',
-                                           message=f'No desired version found of \'{mod.name}\' on modrinth!'
-                                                   f'\n\nFound an available version:\nMod Loader: '
-                                                   f'{version_info[0]}\nMinecraft Version: {version_info[1]}'
-                                                   f'\n\nhttps://modrinth.com/mods{version_url}')
-                return
-
-            file_url = desired_versions[0]['href']
-            file_version = desired_versions[0].find_next_sibling('div', class_='version__metadata').find_next('span',
-                                                                                                              class_='version_number').text
-            file_name = mod.name + ' ' + file_version + '.jar'
-
-            same_mod = list(filter(lambda x: re.match(f'{mod.name}+', x), list_mods))
-            first_duplicate = True
-            for mod in same_mod:
-                if mod == file_name:
-                    if first_duplicate:
-                        first_duplicate = False
-                        continue
-                    else:
-                        os.remove(mods_directory / mod)
-                else:
-                    os.remove(mods_directory / mod)
-
-            urlretrieve(file_url, mods_directory / file_name)
-
+                mod.url_name + '/versions?l=' + modloader.lower() + '&g=' + mcversion)
+            desired_version = scrape_desired_version(soup)
+            if desired_version is None:
+                incompatible_mods.append(mod)
         except URLError as e:
-            messagebox.showerror(title='URL Error', message=f'Modrinth page not found!\n{e}')
+            messagebox.showerror(title='URL Error', message=f'Modrinth page not found for mod {mod.name}!\n{e}')
 
-        messagebox.showinfo('Download Complete',
-                            f'Mods downloaded successfully into your minecraft mods directory!\nFiles can be found in {mods_directory}')
+    if len(incompatible_mods) > 0:
+        messagebox.showinfo(title='Some Mods Incompatible',
+                            message=f'No compatible mod versions found for: '
+                                    f'{", ".join(mod.name for mod in incompatible_mods)}')
+    else:
+        messagebox.showinfo(title='All Mods Compatible',
+                            message='All mods are compatible for specified minecraft version and mod loader!')
+
+
+def download(master, mcversion: str, modloader: str):
+    if len(master.modlist) == 0:
+        return
+
+    mods_directory = get_mod_directory(master, mcversion, modloader)
+    for mod in master.modlist:
+        time.sleep(0.5)  # Temporary solution to HTTP Error: Too Many Requests
+        try:
+            soup = get_modrinth_page(mod.url_name + '/versions?l=' + modloader.lower() + '&g=' + mcversion)
+            desired_version = scrape_desired_version(soup)
+            if desired_version is None:
+                scrape_available_version(soup, mod, mcversion, modloader)
+            else:
+                download_file(desired_version, mod, mods_directory)
+        except HTTPError as e:
+            header = e.headers  # Todo: Extract HTTP header check if Too Many Requests and then get time to wait
+        except URLError as e:
+            messagebox.showerror(title='URL Error', message=f'Modrinth page not found for mod {mod.name}!\n{e}')
+
+    messagebox.showinfo('Download Complete',
+                        f'Mods downloaded successfully into your minecraft mods directory! Files can be found '
+                        f'in:\n\n{mods_directory}')
 
 
 class Footer(ttk.Frame):
@@ -586,25 +636,30 @@ class Footer(ttk.Frame):
         ttk.Frame(self, width=10).pack(side='left', pady=5)
         lbl_version = ttk.Label(self, text='Minecraft Version:')
         lbl_version.pack(side='left', padx=10, pady=5)
-        cbx_version = ttk.Combobox(self, state='readonly', values=mcversions)
-        cbx_version.current(0)
-        cbx_version['width'] = width_configure(max(cbx_version.cget('values'), key=len))
-        cbx_version.pack(side='left', pady=5)
+        self.cbx_version = ttk.Combobox(self, state='readonly', values=mcversions, cursor='pointinghand')
+        self.cbx_version.current(0)
+        self.cbx_version['width'] = width_configure(max(self.cbx_version.cget('values'), key=len))
+        self.cbx_version.bind('<FocusOut>', lambda args: self.selection_clear())
+        self.cbx_version.pack(side='left', pady=5)
 
         # mod loader filter
         ttk.Frame(self, width=10).pack(side='left', padx=5, pady=5)
         lbl_loader = ttk.Label(self, text='Mod Loader:')
         lbl_loader.pack(side='left', padx=10, pady=5)
-        cbx_loader = ttk.Combobox(self, state='readonly', values=modloaders)
-        cbx_loader.current(0)
-        cbx_loader['width'] = width_configure(max(cbx_loader.cget('values'), key=len))
-        cbx_loader.pack(side='left', pady=5)
+        self.cbx_loader = ttk.Combobox(self, state='readonly', values=modloaders, cursor='pointinghand')
+        self.cbx_loader.current(0)
+        self.cbx_loader['width'] = width_configure(max(self.cbx_loader.cget('values'), key=len))
+        self.cbx_loader.bind('<FocusOut>', lambda args: self.selection_clear())
+        self.cbx_loader.pack(side='left', pady=5)
 
         # download button
         ttk.Frame(self, width=10).pack(side='right', padx=2, pady=5)
-        btn_download = ttk.Button(self, text='DOWNLOAD',
-                                  command=lambda: download(master, cbx_version.get(), cbx_loader.get()))
+        btn_download = ttk.Button(self, text='DOWNLOAD', cursor='pointinghand',
+                                  command=lambda: download(master, self.cbx_version.get(), self.cbx_loader.get()))
         btn_download.pack(side='right', padx=5, pady=5)
+        btn_check = ttk.Button(self, text='CHECK', cursor='pointinghand',
+                               command=lambda: compatible(master, self.cbx_version.get(), self.cbx_loader.get()))
+        btn_check.pack(side='right', padx=10, pady=5)
 
 
 class Container(ttk.Frame):
@@ -668,7 +723,8 @@ class Mod(ttk.Frame):
         self.img = Image.open(icons_directory / 'mods' / f'{self.name}.png')
         self.img = self.img.resize((70, 70))
         self.img = ImageTk.PhotoImage(self.img)
-        lbl_icon = ttk.Label(self, image=self.img)
+        lbl_icon = ttk.Label(self, image=self.img, cursor='pointinghand')
+        lbl_icon.bind('<Button-1>', lambda args: open_webview(f'mod/{self.url_name}'))
         lbl_icon.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
 
         # mod name
@@ -676,12 +732,13 @@ class Mod(ttk.Frame):
         lbl_name.grid(row=0, column=1, sticky='w', padx=30)
 
         # select button
-        chk_select = ttk.Checkbutton(self,variable=self.selected, command=master.master.master.master.call_select_change)
+        chk_select = ttk.Checkbutton(self, variable=self.selected, cursor='pointinghand',
+                                     command=master.master.master.master.call_select_change)
         chk_select.grid(row=0, column=2, sticky='e', padx=20)
 
 
-def open_webview():
-    webbrowser.open('https://modrinth.com/mods')
+def open_webview(url_extension):
+    webbrowser.open(f'https://modrinth.com/{url_extension}')
 
 
 class Window(tk.Toplevel):
@@ -703,7 +760,7 @@ class Window(tk.Toplevel):
 
     def create_widgets(self):
         # mod webview button
-        btn_webview = ttk.Button(self, text='Open Modrinth', command=open_webview)
+        btn_webview = ttk.Button(self, text='Open Modrinth', command=lambda: open_webview('mods'))
         btn_webview.pack(side='left', padx=20, pady=5)
         # mod url entry
         ent_url = ttk.Entry(self, width=100, font=('Helvetica', 20))
@@ -717,4 +774,4 @@ class Window(tk.Toplevel):
         ent_url.pack(side='left', pady=5)
 
 
-app = App('Modlist Manager', (700, 500))
+app = App('Modlist Manager', (800, 500))
