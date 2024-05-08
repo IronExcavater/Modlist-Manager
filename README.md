@@ -14,9 +14,13 @@ managing your modlists and instead increasing your time enjoying minecraft!
 
 Installation
 -
-Download the code as a zip and extract the project anywhere you'd like to! The modlists are saved into .txt files within
-the 'modlists' folder when saved. If you remove/update the project files, make sure to keep a backup of those .txt
-files, otherwise your modlists will be lost to the eternal pit of your recyling bin.
+1. Download the project code as a .zip and extract the .zip anywhere you'd like to!
+
+Notes
+-
+When saving, the modlists are stored in .txt files within the 'modlists' folder. If you remove/update the project files,
+make sure to keep a backup of those .txt files, otherwise your modlists will be lost to the eternal pit of being 
+overridden.
 
 Future Content
 -
@@ -26,7 +30,6 @@ I will fix these as soon as possible! Thanks.
 
 Credits
 -
-***
 As Python's Base Tkinter Styling is horrible and it would be a hassle to create an appealing CustomtKinter, the
 alternative was to use external Tkinter style packages. This project uses 
 [Sun Valley](https://github.com/rdbende/Sun-Valley-ttk-theme) by [rebende](https://github.com/rdbende), a massive
