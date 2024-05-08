@@ -48,6 +48,11 @@ requestheader = {
     'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8'
 }
 
+if sys.platform == 'darwin':
+    pointerhand = 'pointinghand'
+else:
+    pointerhand = 'hand2'
+
 modlists_directory = Path('modlists')
 icons_directory = Path('icons')
 
@@ -380,11 +385,11 @@ class Tools(ttk.Frame):
     def create_tools(self, master):
         # add tool
         ttk.Frame(self, width=10).pack(side='left', pady=5)
-        btn_add = ttk.Button(self, text='Add Mod', command=lambda: open_window(master), cursor='pointinghand')
+        btn_add = ttk.Button(self, text='Add Mod', command=lambda: open_window(master), cursor=pointerhand)
         btn_add.pack(side='left', padx=10, pady=5)
 
         # find tool
-        self.ent_find = ttk.Entry(self, width=10, cursor='pointinghand')
+        self.ent_find = ttk.Entry(self, width=10, cursor=pointerhand)
         self.ent_find.insert(0, 'Find...')
         self.ent_find.bind('<FocusIn>',
                            lambda args: self.ent_find.get() == 'Find...' and self.ent_find.delete(0, 'end'))
@@ -396,7 +401,7 @@ class Tools(ttk.Frame):
 
         # select all tool
         self.select_mode = False
-        self.btn_selectall = ttk.Button(self, text='Select All', cursor='pointinghand')
+        self.btn_selectall = ttk.Button(self, text='Select All', cursor=pointerhand)
         self.btn_selectall.bind('<ButtonRelease>', lambda args: self.btn_select_all(master))
         self.btn_selectall.pack(side='left', padx=5, pady=5)
 
@@ -405,7 +410,7 @@ class Tools(ttk.Frame):
 
         # sort tool
         ttk.Frame(self, width=10).pack(side='right', padx=5, pady=5)
-        self.cbx_sort = ttk.Combobox(self, state='readonly', values=('A to Z', 'Z to A'), cursor='pointinghand')
+        self.cbx_sort = ttk.Combobox(self, state='readonly', values=('A to Z', 'Z to A'), cursor=pointerhand)
         self.cbx_sort.current(0)
         self.cbx_sort['width'] = width_configure(max(self.cbx_sort.cget('values'), key=len))
         self.cbx_sort.bind('<<ComboboxSelected>>', lambda args: sort(master, self.cbx_sort.get()))
@@ -462,7 +467,7 @@ class Tools(ttk.Frame):
         elif num_selected > 0:
             if not self.delete_show:
                 self.btn_delete = ttk.Button(self, text='Delete Mod', command=lambda: delete(master, self.select_mode),
-                                             cursor='pointinghand')
+                                             cursor=pointerhand)
                 self.delete_show = True
 
             self.btn_delete['text'] = 'Delete Mod' if num_selected == 1 else 'Delete Mods'
@@ -636,7 +641,7 @@ class Footer(ttk.Frame):
         ttk.Frame(self, width=10).pack(side='left', pady=5)
         lbl_version = ttk.Label(self, text='Minecraft Version:')
         lbl_version.pack(side='left', padx=10, pady=5)
-        self.cbx_version = ttk.Combobox(self, state='readonly', values=mcversions, cursor='pointinghand')
+        self.cbx_version = ttk.Combobox(self, state='readonly', values=mcversions, cursor=pointerhand)
         self.cbx_version.current(0)
         self.cbx_version['width'] = width_configure(max(self.cbx_version.cget('values'), key=len))
         self.cbx_version.bind('<FocusOut>', lambda args: self.selection_clear())
@@ -646,7 +651,7 @@ class Footer(ttk.Frame):
         ttk.Frame(self, width=10).pack(side='left', padx=5, pady=5)
         lbl_loader = ttk.Label(self, text='Mod Loader:')
         lbl_loader.pack(side='left', padx=10, pady=5)
-        self.cbx_loader = ttk.Combobox(self, state='readonly', values=modloaders, cursor='pointinghand')
+        self.cbx_loader = ttk.Combobox(self, state='readonly', values=modloaders, cursor=pointerhand)
         self.cbx_loader.current(0)
         self.cbx_loader['width'] = width_configure(max(self.cbx_loader.cget('values'), key=len))
         self.cbx_loader.bind('<FocusOut>', lambda args: self.selection_clear())
@@ -654,10 +659,10 @@ class Footer(ttk.Frame):
 
         # download button
         ttk.Frame(self, width=10).pack(side='right', padx=2, pady=5)
-        btn_download = ttk.Button(self, text='DOWNLOAD', cursor='pointinghand',
+        btn_download = ttk.Button(self, text='DOWNLOAD', cursor=pointerhand,
                                   command=lambda: download(master, self.cbx_version.get(), self.cbx_loader.get()))
         btn_download.pack(side='right', padx=5, pady=5)
-        btn_check = ttk.Button(self, text='CHECK', cursor='pointinghand',
+        btn_check = ttk.Button(self, text='CHECK', cursor=pointerhand,
                                command=lambda: compatible(master, self.cbx_version.get(), self.cbx_loader.get()))
         btn_check.pack(side='right', padx=10, pady=5)
 
@@ -723,7 +728,7 @@ class Mod(ttk.Frame):
         self.img = Image.open(icons_directory / 'mods' / f'{self.name}.png')
         self.img = self.img.resize((70, 70))
         self.img = ImageTk.PhotoImage(self.img)
-        lbl_icon = ttk.Label(self, image=self.img, cursor='pointinghand')
+        lbl_icon = ttk.Label(self, image=self.img, cursor=pointerhand)
         lbl_icon.bind('<Button-1>', lambda args: open_webview(f'mod/{self.url_name}'))
         lbl_icon.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
 
@@ -732,7 +737,7 @@ class Mod(ttk.Frame):
         lbl_name.grid(row=0, column=1, sticky='w', padx=30)
 
         # select button
-        chk_select = ttk.Checkbutton(self, variable=self.selected, cursor='pointinghand',
+        chk_select = ttk.Checkbutton(self, variable=self.selected, cursor=pointerhand,
                                      command=master.master.master.master.call_select_change)
         chk_select.grid(row=0, column=2, sticky='e', padx=20)
 
