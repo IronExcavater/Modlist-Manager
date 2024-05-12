@@ -5,9 +5,9 @@ from cx_Freeze import setup, Executable
 
 # Dependencies are automatically detected, but it might need fine-tuning.
 build_options_exe = {'packages': ['PIL', 'cursepy', 'modrinth'], 'include_files': ['icon.png']}
-build_options_msi = {'install_icon': 'icon.png', 'target_name': 'Modlist Manager v0.2.msi'}
+build_options_msi = {'install_icon': 'icon.png', 'target_name': 'Modlist Manager'}
 build_options_app = {'iconfile': 'icon.png', 'bundle_name': 'Modlist Manager'}
-build_options_dmg = {'applications_shortcut': True, 'volume_label': 'Modlist Manager v0.2'}
+build_options_dmg = {'applications_shortcut': True, 'volume_label': 'Modlist Manager-0.2-mac'}
 
 base = 'gui'
 
