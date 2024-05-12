@@ -1,7 +1,7 @@
 from cx_Freeze import setup, Executable
 
 # Create Windows installer: python ./setup.py bdist_msi
-# Create Mac disk image: python ./setup.py bdist_dmg --applications-shortcut
+# Create Mac disk image: python ./setup.py bdist_dmg
 
 # Dependencies are automatically detected, but it might need fine-tuning.
 build_options_exe = {'packages': ['PIL', 'cursepy', 'modrinth'], 'include_files': ['icon.png']}
