@@ -1,14 +1,19 @@
 import os
 import sys
 import re
+from base64 import b64decode
+from datetime import datetime
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
+
+import cursepy.wrapper
 import sv_ttk
 import webbrowser
 from urllib.request import urlretrieve
 from PIL import Image, ImageTk
 import modrinth
+from cursepy import CurseClient
 
 mcversions = (
     '1.20.6', '1.20.5', '1.20.4', '1.20.3', '1.20.2', '1.20.1', '1.20',
@@ -38,21 +43,21 @@ modloaders = (
     'Fabric', 'Forge', 'Quilt', 'NeoForge'
 )
 
-requestheader = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 '
-                  'Safari/537.36 OPR/107.0.0.0',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,'
-              'application/signed-exchange;v=b3;q=0.7',
-    'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8'
-}
+API_KEY: str = b64decode("JDJhJDEwJFhkNkhYT3dweFI1UTIvWGpyZjBkUC5hSDFaRDE5T3pRZC9mVnVNLk94QXJJL01DTlZtNHZh").decode(
+    "utf-8")
+curse_client = CurseClient(API_KEY)
 
 if sys.platform == 'darwin':
     pointerhand = 'pointinghand'
+    base_path = Path('Library/Application Support/Modlist Manager')
+    if not os.path.exists(base_path):
+        os.mkdir(base_path)
 else:
     pointerhand = 'hand2'
+    base_path = Path('.')
 
-modlists_directory = Path('modlists')
-modicons_directory = Path('modicons')
+modlists_directory = base_path / 'modlists'
+modicons_directory = base_path / 'modicons'
 
 if not os.path.exists(modlists_directory):
     os.mkdir(modlists_directory)
@@ -70,8 +75,11 @@ class App(tk.Tk):
         self.minsize(size[0], size[1])
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
-        icon = tk.PhotoImage(file='icon.png')
-        self.wm_iconphoto(True, icon)
+
+        if sys.platform == 'win32':
+            icon = tk.PhotoImage(file='icon.png')
+            self.wm_iconphoto(True, icon)
+
         self.protocol('WM_DELETE_WINDOW', self.on_exit)
 
         # theme styling
@@ -102,15 +110,31 @@ class App(tk.Tk):
         self.heading.delete(0, 'end')
         self.heading.insert(0, new_heading)
 
-    def add_mod(self, url_name: str, new: bool):
+    def add_mod(self, slug: str, new: bool):
         try:
-            new_mod = modrinth.Projects.ModrinthProject(url_name)
+            # Get curseforge mod
+            search = curse_client.get_search()
+            search.slug = slug
+            curseforge_mod = CurseForgeMod(curse_client.search(432, search=search)[0])
+            modrinth_mod = ModrinthMod(slug)
+
+            if curseforge_mod is not None:
+                # Prioritise modrinth naming convention
+                if modrinth_mod is not None:
+                    curseforge_mod.name = modrinth_mod.name
+                new_mod = curseforge_mod
+            elif modrinth_mod is not None:
+                new_mod = modrinth_mod
+            # If both curseforge and modrinth fail, then raise exception
+            else:
+                raise Exception(f'Mod {slug} not found')
+
             for mod in self.modlist:
-                if new_mod.name == mod.api_ref.name:
+                if mod.mod_ref.name == new_mod.name:
                     messagebox.showerror('Mod Already Exists', 'Mod already exists in modlist')
                     return
-            print(f'name: {new_mod.name}, id: {new_mod.id}, slug: {new_mod.slug}')
-            get_mod_icon(new_mod)
+
+            new_mod.get_icon()
             self.modlist.append(Mod(self.container.list, new_mod, len(self.modlist)))
             sort(self, self.tools.cbx_sort.get())
 
@@ -126,19 +150,20 @@ class App(tk.Tk):
 def unsaved_dialog(master) -> bool:
     if master.unsaved_changes:
         exit_dialog = messagebox.askyesnocancel('Unsaved Changes', 'Do you want to save changes before continuing?')
-        if exit_dialog:
+        if exit_dialog:  # yes
             if not save_list(master):
                 return False
-        elif exit_dialog is None:
+        elif exit_dialog is None:  # cancel
             return False
     return True
 
 
-def get_mod_icon(mod):
+def get_mod_icon(mod, icon_url):
     if os.path.exists(modicons_directory / f'{mod.name}.png'):
         return
+    print(f'Getting icon for {mod.name}')
     try:
-        urlretrieve(mod.iconURL, modicons_directory / f'{mod.name}.png')
+        urlretrieve(icon_url, modicons_directory / f'{mod.name}.png')
     except Exception as e:
         messagebox.showerror('Icon Error', f'{e}')
     img_small = Image.open(modicons_directory / f'{mod.name}.png')
@@ -161,13 +186,22 @@ def open_list(master):
                                           filetypes=(('Text files', '*.txt'), ('All files', '*.*')))
     if not filepath:
         return
+
     with open(filepath, 'r') as f:
         clear_list(master)
         master.update_heading(filepath.split('/')[-1].split('.')[0])
         for i, line in enumerate(f):
-            line = line.strip().split(', ')
-            for string in line:
-                master.add_mod(string, False)
+            try:
+                if line.lower().startswith('options: '):
+                    line = line.strip().split(': ')[-1].split(', ')
+                    master.footer.cbx_version.current(mcversions.index(line[0]))
+                    master.footer.cbx_loader.current([loader.lower() for loader in modloaders].index(line[1].lower()))
+                else:
+                    line = line.strip().split(', ')
+                    for slug in line:
+                        master.add_mod(slug, False)
+            except Exception as e:
+                messagebox.showerror('File Format Error', f'{e}')
 
 
 def clear_list(master):
@@ -182,30 +216,30 @@ def save_list(master):
         return
 
     if master.heading.get() == 'Untitled Modlist':
-        if not messagebox.askokcancel('Untitled Modlist', 'You haven\'t specified a title for the '
-                                                          'modlist.\nDo you want to continue?'):
+        if not messagebox.askyesno('Untitled Modlist', 'You haven\'t specified a title for the '
+                                                       'modlist.\nDo you want to continue?'):
             return False
 
     list_name = master.heading.get()
     if os.path.exists(modlists_directory / f'{list_name}.txt'):
-        if not messagebox.askokcancel('Existing Modlist', 'An existing modlist has the same title!\nDo '
-                                                          'you want to override the existing modlist?'):
+        if not messagebox.askyesno('Existing Modlist', 'An existing modlist has the same title!\nDo '
+                                                       'you want to override the existing modlist?'):
             return False
         os.remove(modlists_directory / f'{list_name}.txt')
 
     with open(modlists_directory / f'{list_name}.txt', 'a') as f:
-        master.modlist.sort(key=lambda args: args.api_ref.name)
-
+        master.modlist.sort(key=lambda args: args.mod_ref.name)
+        f.write(f'Options: {master.footer.cbx_version.get()}, {master.footer.cbx_loader.get().lower()}\n')
         line = ''
         for mod in master.modlist:
-            if len(line) + len(mod.api_ref.slug) + 2 > 112:
+            if len(line) + len(mod.mod_ref.slug) + 2 > 112:
                 f.write(line + '\n')
                 line = ''
             else:
                 if line == '':
-                    line += mod.api_ref.slug
+                    line += mod.mod_ref.slug
                 else:
-                    line += ', ' + mod.api_ref.slug
+                    line += ', ' + mod.mod_ref.slug
         if line != '':
             f.write(line)
 
@@ -236,6 +270,7 @@ def get_mod_directory(master, mcversion: str, modloader: str):
     if not os.path.exists(mods_directory):
         os.mkdir(mods_directory)
 
+    print(mods_directory)
     return mods_directory
 
 
@@ -245,73 +280,81 @@ def download_list(master, mcversion: str, modloader: str):
 
     mods_directory = get_mod_directory(master, mcversion, modloader)
     existing_mods = os.listdir(mods_directory)
+    for mod in existing_mods:
+        os.remove(mods_directory / mod)
 
-    for mod in master.modlist:
-        for version_id in reversed(
-                mod.api_ref.versions):  # TODO: Create a faster version locator than looping through all versions
-            version = mod.api_ref.getVersion(version_id)
-            # Correct mcversion and modloader
-            if mcversion in version.gameVersions and modloader in version.loaders:
-                file_name = mod.api_ref.name + ' ' + version.name + '.jar'
-                file_hash = version.getFiles()[0]
-                file_url = version.getDownload(file_hash)
-                print(f'{mod.api_ref.name}: {file_url}')
+    progress_bar = ttk.Progressbar(master.footer, mode='determinate', maximum=len(master.modlist))
+    progress_bar.pack(side='right', padx=10)
+    progress_bar.update()
 
-                # check if mod file exists
-                existing_mod_files = list(filter(lambda x: re.match(f'{mod.api_ref.name}+', x), existing_mods))
-                # For simplicity, remove any file with same mod name
-                for file in existing_mod_files:
-                    os.remove(mods_directory / file)
+    incompatible_mods = []
+    fabric_api = False
+    for i, mod in enumerate(master.modlist):
+        if not download_mod(mods_directory, mod, mods_directory, mcversion, modloader):
+            incompatible_mods.append(mod.mod_ref.name)
 
-                urlretrieve(file_url, mods_directory / file_name)
-                break
+        progress_bar['value'] = i + 1
+        progress_bar['maximum'] = len(master.modlist)
+        progress_bar.update()
 
-            # Older mcversions, equality is backwards due to nature of mcversions list (newer versions have smaller indexes)
-            try:
-                if mcversions.index(mcversion) < mcversions.index(version.gameVersions[0]):
-                    messagebox.showerror(title='Mod Download Unavailable',
-                                         message=f'No version found of \'{mod.api_ref.name}\' on modrinth for '
-                                                 f'{modloader} {mcversion}.')
-                break
-            except ValueError:  # If mod has unknown minecraft versions such as snapshots
-                continue
+        if modloader == 'fabric' and mod.mod_ref.slug == 'fabric-api':
+            fabric_api = True
 
-    messagebox.showinfo('Download Complete',
-                        f'Mods downloaded successfully into your minecraft mods directory! Files can be found '
-                        f'in:\n\n{mods_directory}')
+    if modloader == 'fabric' and not fabric_api:
+        search = curse_client.get_search()
+        search.slug = 'fabric-api'
+        fabric_api_mod = CurseForgeMod(curse_client.search(432, search=search)[0])
+        fabric_api_mod.get_icon()
+        master.modlist.append(Mod(master.container.list, fabric_api_mod, len(master.modlist)))
+        fabric_api_mod.download_mod(master, mods_directory, mcversion, modloader)
+
+    progress_bar.destroy()
+    if len(incompatible_mods) > 0:
+        messagebox.showinfo(title='Download Incomplete',
+                            message=f'Location \'{str(mods_directory).split("/")[-1]}\', some mods unsuccessfully'
+                                    f'downloaded: {", ".join(incompatible_mods)}')
+    else:
+        messagebox.showinfo(title='Download Complete',
+                            message=f'Location \'{str(mods_directory).split("/")[-1]}\', all mods successfully '
+                                    f'downloaded!')
+
+
+def download_mod(master, mod, mods_directory, mcversion, modloader):
+    if not mod.mod_ref.download_mod(master, mods_directory, mcversion, modloader):
+        if isinstance(mod.mod_ref, CurseForgeMod):
+            modrinth_mod = ModrinthMod(mod.mod_ref.slug)
+            if modrinth_mod is not None and abs(modrinth_mod.updated - mod.mod_ref.updated).days > 3:
+                mod.mod_ref = modrinth_mod
+                download_mod(master, mod, mods_directory, mcversion, modloader)
+                return
+        return False
+    return True
 
 
 def compatible_list(master, mcversion: str, modloader: str):
     if len(master.modlist) == 0:
         return
 
+    progress_bar = ttk.Progressbar(master.footer, mode='determinate', maximum=len(master.modlist))
+    progress_bar.pack(side='right', padx=10)
+    progress_bar.update()
+
     incompatible_mods = []
+    for i, mod in enumerate(master.modlist):
+        if not mod.mod_ref.compatible(master, mcversion, modloader):
+            incompatible_mods.append(mod.mod_ref.name)
+        progress_bar['value'] = i + 1
+        progress_bar['maximum'] = len(master.modlist)
+        progress_bar.update()
 
-    for mod in master.modlist:
-        for version_id in reversed(
-                mod.api_ref.versions):  # TODO: Create a faster version locator than looping through all versions
-            version = mod.api_ref.getVersion(version_id)
-            # Correct mcversion and modloader
-            if mcversion in version.gameVersions and modloader in version.loaders:
-                break
-
-            # Older mcversions, equality is backwards due to nature of mcversions list (newer versions have smaller indexes)
-            try:
-                if mcversions.index(mcversion) < mcversions.index(version.gameVersions[0]):
-                    messagebox.showerror(title='Mod Download Unavailable',
-                                         message=f'No version found of \'{mod.api_ref.name}\' on modrinth for {modloader} {mcversion}.')
-                    incompatible_mods.append(mod.api_ref.name)
-                    break
-            except ValueError:  # If mod has unknown minecraft versions such as snapshots
-                continue
-
+    progress_bar.destroy()
     if len(incompatible_mods) > 0:
         messagebox.showinfo(title='Some Mods Incompatible',
-                            message=f'No compatible mod versions found for: '
+                            message=f'No compatible mod version found for {modloader} {mcversion}: '
                                     f'{", ".join(incompatible_mods)}')
     else:
         messagebox.showinfo(title='All Mods Compatible',
-                            message='All mods are compatible for specified minecraft version and mod loader!')
+                            message=f'All mods are compatible for {modloader} {mcversion}!')
 
 
 class Menu(tk.Menu):
@@ -331,7 +374,7 @@ class Menu(tk.Menu):
 
         # tools menu
         mnu_tools = tk.Menu(self, tearoff=0)
-        mnu_tools.add_command(label='Add Mod', command=lambda: open_window(master))
+        mnu_tools.add_command(label='Add Mod', command=lambda: mod_window_open(master))
         mnu_tools.add_separator()
         mnu_tools.add_command(label='Select All', command=lambda: menu_set_selection(master, False))
         mnu_tools.add_command(label='Deselect All', command=lambda: menu_set_selection(master, True))
@@ -348,10 +391,10 @@ class Menu(tk.Menu):
         mnu_actions = tk.Menu(self, tearoff=0)
         mnu_actions.add_command(label='Download Modlist',
                                 command=lambda: download_list(master, master.footer.cbx_version.get(),
-                                                              master.footer.cbx_loader.get()))
+                                                              master.footer.cbx_loader.get().lower()))
         mnu_actions.add_command(label='Check Compatibility',
                                 command=lambda: compatible_list(master, master.footer.cbx_version.get(),
-                                                                master.footer.cbx_loader.get()))
+                                                                master.footer.cbx_loader.get().lower()))
         self.add_cascade(label='Actions', menu=mnu_actions)
 
 
@@ -402,7 +445,7 @@ class Tools(ttk.Frame):
     def create_tools(self, master):
         # add tool
         ttk.Frame(self, width=10).pack(side='left', pady=5)
-        btn_add = ttk.Button(self, text='Add Mod', command=lambda: open_window(master), cursor=pointerhand)
+        btn_add = ttk.Button(self, text='Add Mod', command=lambda: mod_window_open(master), cursor=pointerhand)
         btn_add.pack(side='left', padx=10, pady=5)
 
         # find tool
@@ -491,18 +534,20 @@ class Tools(ttk.Frame):
             self.btn_delete.pack(side='right', padx=10, pady=5)
 
 
-def open_window(master):
-    Window(master, 'Enter Modrinth URL', (1000, 50))
+def mod_window_open(master):
+    AddModWindow(master, 'Enter CurseForge or Modrinth URL', (1000, 50))
 
 
-def close_window(window, url: str):
+def mod_window_input(window, url: str):
     try:
-        if url[:25] != 'https://modrinth.com/mod/':
-            messagebox.showerror(title='URL Error', message=f'URL isn\'t Modrinth')
+        if url[:25] == 'https://modrinth.com/mod/':
+            slug = url[25:].split('/', 1)[0]
+        elif url[:45] == 'https://www.curseforge.com/minecraft/mc-mods/':
+            slug = url[45:].split('/', 1)[0]
+        else:
+            messagebox.showerror(title='URL Error', message=f'URL doesn\'t contain valid mod')
             return
-
-        url_name = url[25:].split('/', 1)[0]
-        window.master.add_mod(url_name, True)
+        window.master.add_mod(slug, True)
         window.destroy()
     except ValueError as e:
         messagebox.showerror(title='Unknown URL Type', message=f'Input cannot be parsed as URL!\n{e}')
@@ -510,7 +555,7 @@ def close_window(window, url: str):
 
 def find(master, string: str):
     for i, mod in enumerate(master.modlist):
-        if re.search(string.lower(), mod.api_ref.name.lower()):
+        if re.search(string.lower(), mod.mod_ref.name.lower()):
             mod.grid(row=i, sticky='ew', pady=5)
         else:
             mod.grid_forget()
@@ -542,7 +587,7 @@ def sort(master, sorting: str):
     reverse = False
     if sorting == 'Z to A':
         reverse = True
-    master.modlist.sort(key=lambda args: args.api_ref.name, reverse=reverse)
+    master.modlist.sort(key=lambda args: args.mod_ref.name, reverse=reverse)
     for i, mod in enumerate(master.modlist):
         mod.grid(row=i, sticky='ew', pady=5)
 
@@ -659,29 +704,29 @@ class Container(ttk.Frame):
 
 
 class Mod(ttk.Frame):
-    def __init__(self, master, api_ref, row: int):
+    def __init__(self, master, mod_ref, row: int):
         super().__init__(master)
         self['relief'] = 'ridge'
         self['borderwidth'] = 5
         self.grid(row=row, sticky='ew', pady=5)
         self.columnconfigure(1, weight=1)
 
-        self.api_ref = api_ref
+        self.mod_ref = mod_ref
         self.selected = tk.IntVar()
 
         self.create_widgets(master)
 
     def create_widgets(self, master):
         # mod icon
-        self.img = Image.open(modicons_directory / f'{self.api_ref.name}.png')
+        self.img = Image.open(modicons_directory / f'{self.mod_ref.name}.png')
         self.img = self.img.resize((70, 70))
         self.img = ImageTk.PhotoImage(self.img)
         lbl_icon = ttk.Label(self, image=self.img, cursor=pointerhand)
-        lbl_icon.bind('<Button-1>', lambda args: open_webview(f'mod/{self.api_ref.slug}'))
+        lbl_icon.bind('<Button-1>', lambda args: self.mod_ref.open_webview())
         lbl_icon.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
 
         # mod name
-        lbl_name = tk.Label(self, text=self.api_ref.name, font=('Helvetica', 30))
+        lbl_name = tk.Label(self, text=self.mod_ref.name, font=('Helvetica', 30))
         lbl_name.grid(row=0, column=1, sticky='w', padx=30)
 
         # select button
@@ -690,20 +735,124 @@ class Mod(ttk.Frame):
         chk_select.grid(row=0, column=2, sticky='e', padx=20)
 
 
-def open_webview(url_extension):
-    webbrowser.open(f'https://modrinth.com/{url_extension}')
+class CurseForgeMod(cursepy.wrapper.base.CurseAddon):
+    def __init__(self, addon: cursepy.wrapper.base.CurseAddon):
+        self.addon = addon
+        self.name = addon.name
+        self.slug = addon.slug
+        self.url = addon.url
+        self.updated = datetime.strptime(addon.date_release, '%Y-%m-%dT%H:%M:%S.%fZ')
+        self.id = addon.id
+        self.game_id = addon.game_id
+        self.attachments = addon.attachments
+
+    def get_icon(self):
+        get_mod_icon(self, self.attachments[0].url)
+
+    def download_mod(self, master, mods_directory, mcversion, modloader) -> bool:
+        print(f'Download CurseForge Mod: {self.name}')
+        for file in self.addon.files():
+            print(f'Version: {file.version}')
+            if file.file_status == file.RELEASED and mcversion in file.version and modloader in [version.lower() for version in file.version]:
+                print(f'Chosen Version: {file.display_name}')
+                self.download_version(mods_directory, file)
+                self.check_dependencies(master, file)
+                return True
+        else:
+            return False
+
+    def download_version(self, mods_directory, version):
+        print(f'Downloading {version.file_name}')
+        file_url = version.download_url
+        urlretrieve(file_url, mods_directory / version.file_name)
+
+    def check_dependencies(self, master, version):
+        for dependency in version.dependencies:
+            if dependency.type == dependency.REQUIRED:
+                dependency_mod = CurseForgeMod(curse_client.addon(dependency.addon_id))
+                print(f' > {dependency_mod.name}')
+                for mod in master.modlist:
+                    if mod.mod_ref.name == dependency_mod.name:
+                        break
+                else:
+                    dependency_mod.get_icon()
+                    master.modlist.append(Mod(master.container.list, dependency_mod, len(master.modlist)))
+
+    def compatible(self, master, mcversion, modloader):
+        for file in self.addon.files():
+            # Correct mcversion and modloader
+            print(f'Version: {file.version}')
+            if mcversion in file.version and modloader in [version.lower() for version in file.version]:
+                self.check_dependencies(master, file)
+                return True
+        else:
+            return False
+
+    def open_webview(self):
+        open_webview(self.url)
 
 
-class Window(tk.Toplevel):
+class ModrinthMod(modrinth.Projects.ModrinthProject):
+    def __init__(self, slug: str):
+        super().__init__(slug)
+        self.updated = datetime.strptime(self.updated, '%Y-%m-%dT%H:%M:%S.%fZ')
+
+    def get_icon(self):
+        get_mod_icon(self, self.iconURL)
+
+    def download_mod(self, master, mods_directory, mcversion, modloader):
+        print(f'Download Modrinth Mod: {self.name}')
+        for version_id in reversed(self.versions):
+            version = self.getVersion(version_id)
+            print(f'Version: {version.gameVersions}, {version.loaders}')
+
+            if mcversion in version.gameVersions and modloader in version.loaders:
+                print(f'Chosen Version: {version.name}')
+                self.download_version(mods_directory, version)
+                self.check_dependencies(master, version)
+                break
+
+    def download_version(self, mods_directory, version):
+        file_name = self.slug + '-' + version.name + '.jar'
+        print(f'Downloading {file_name}')
+        file_hash = version.getFiles()[0]
+        file_url = version.getDownload(file_hash)
+        urlretrieve(file_url, mods_directory / file_name)
+
+    def check_dependencies(self, master, version):
+        for dependency in version.dependencies:
+            if dependency['dependency_type'] == 'required':
+                dependency_mod = ModrinthMod(dependency['project_id'])
+                print(f' > {dependency_mod.name}')
+                for mod in master.modlist:
+                    if mod.mod_ref.name == dependency_mod.name:
+                        break
+                else:
+                    dependency_mod.get_icon()
+                    master.modlist.append(Mod(master.container.list, dependency_mod, len(master.modlist)))
+
+    def compatible(self, master, mcversion, modloader):
+        for version_id in reversed(self.versions):
+            version = self.getVersion(version_id)
+            # Correct mcversion and modloader
+            if mcversion in version.gameVersions and modloader in version.loaders:
+                self.check_dependencies(master, version)
+                return True
+        else:
+            return False
+
+    def open_webview(self):
+        open_webview(f'https://modrinth.com/mod/{self.slug}')
+
+
+class AddModWindow(tk.Toplevel):
     def __init__(self, master, title: str, size: tuple):
         # main setup
         super().__init__(master)
-        self.url_name = None
         self.title(title)
         self.geometry(f'{size[0]}x{size[1]}')
         self.minsize(size[0], size[1])
         self.maxsize(size[0], size[1])
-        self.bell()
 
         self.create_widgets()
 
@@ -712,19 +861,29 @@ class Window(tk.Toplevel):
         master.wait_window(self)
 
     def create_widgets(self):
-        # mod webview button
-        btn_webview = ttk.Button(self, text='Open Modrinth', command=lambda: open_webview('mods'))
-        btn_webview.pack(side='left', padx=20, pady=5)
+        # curseforge webview button
+        btn_webview = ttk.Button(self, text='CurseForge',
+                                 command=lambda: open_webview('https://www.curseforge.com/minecraft/search?class=mc'
+                                                              '-mods'))
+        btn_webview.pack(side='left', padx=10, pady=5)
+        # modrinth webview button
+        btn_webview = ttk.Button(self, text='Modrinth', command=lambda: open_webview('https://modrinth.com/mods'))
+        btn_webview.pack(side='left', pady=5)
+        ttk.Frame(self, width=10).pack(side='left', pady=5)
         # mod url entry
-        ent_url = ttk.Entry(self, width=100, font=('Helvetica', 20))
-        ent_url.insert(0, 'Enter Modrinth URL for Mod...')
+        ent_url = ttk.Entry(self, width=63, font=('Helvetica', 20))
+        ent_url.insert(0, 'Enter URL for Mod...')
         ent_url.bind('<FocusIn>',
-                     lambda args: ent_url.get() == 'Enter Modrinth URL for Mod...' and ent_url.delete(0, 'end'))
+                     lambda args: ent_url.get() == 'Enter URL for Mod...' and ent_url.delete(0, 'end'))
         ent_url.bind('<FocusOut>',
-                     lambda args: ent_url.get() == '' and ent_url.insert(0, 'Enter Modrinth URL for Mod...'))
-        ent_url.bind('<Return>', lambda args: close_window(self, ent_url.get()))
+                     lambda args: ent_url.get() == '' and ent_url.insert(0, 'Enter URL for Mod...'))
+        ent_url.bind('<Return>', lambda args: mod_window_input(self, ent_url.get()))
         ent_url.bind('<BackSpace>', lambda args: ent_url.delete(0, 'end'))
         ent_url.pack(side='left', pady=5)
 
 
-app = App('Modlist Manager', (800, 500))
+def open_webview(url: str):
+    webbrowser.open(url)
+
+
+app = App('Modlist Manager', (900, 500))
