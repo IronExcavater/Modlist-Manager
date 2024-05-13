@@ -6,10 +6,10 @@ through it, downloading the correct version and moving it to your mods folder. I
 the point that I created this project!
 
 A simple GUI application providing an interface to create and store your custom Minecraft 'modlists'. Seamlessly 
-check compatibility or download the modlist for a specific Minecraft version and mod loader of your choosing. Seamlessly
-utilises APIs from popular platforms of CurseForge and Modrinth to achieve a holistic approach. Take advantage of the 
-various quality-of-life features/tools including sorting, finding, selecting and deleting which aim to decrease your 
-time managing your modlists and instead increasing your time enjoying Minecraft!
+check compatibility or download the modlist for a specific Minecraft version and mod loader of your choosing. Utilises
+APIs from popular platforms of CurseForge and Modrinth to achieve a holistic approach. Take advantage of the various
+quality-of-life features/tools including sorting, finding, selecting and deleting which aim to decrease your time
+managing your modlists and instead increasing your time enjoying Minecraft!
 ## Features
 - [X] Utilises both CurseForge and Modrinth APIs
 - [X] Interactive application design with immediate feedback
