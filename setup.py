@@ -17,7 +17,6 @@ executables = [
 
 setup(name='Modlist Manager',
       version='0.2',
-      description='Automatically maintain and download your custom Minecraft mods',
       options={'build_exe': build_options_exe,
                'bdist_msi': build_options_msi,
                'bdist_mac': build_options_app,
