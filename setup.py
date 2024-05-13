@@ -12,11 +12,16 @@ build_options_dmg = {'applications_shortcut': True, 'volume_label': 'Modlist Man
 base = 'gui'
 
 executables = [
-    Executable('main.py', base=base, target_name='Modlist Manager', icon='icon.png')
+    Executable('main.py', base=base, target_name='Modlist Manager', icon='icon',
+               shortcut_name='Modlist Manager', shortcut_dir='ProgramMenuFolder')
 ]
 
 setup(name='Modlist Manager',
       version='0.2',
+      description='Modlist Manager',
+      author='Niclas Rogulski',
+      url='https://github.com/IronExcavater/Modlist-Manager',
+      license='MIT',
       options={'build_exe': build_options_exe,
                'bdist_msi': build_options_msi,
                'bdist_mac': build_options_app,
