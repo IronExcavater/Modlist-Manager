@@ -24,7 +24,7 @@ managing your modlists and instead increasing your time enjoying Minecraft!
 2. Download the suitable installer for your operating system,<br>Windows: ***.msi***<br>Mac: ***.dmg***
 3. Run the installer, follow its prompts, open the application and violà!
 
-**Note for Mac:** Currently (v0.2), the application cannot be opened normally from its icon. I will try to fix this, but
+**Note for Mac:** Currently (v0.3), the application cannot be opened normally from its icon. I will try to fix this, but
 a quick workaround to open the application is with these steps:
 1. Locate the application in your *'applications'* folder and right-click to open the context menu.
 2. Within the context menu, click *'Show Package Content'*

@@ -46,15 +46,16 @@ modloaders = (
 API_KEY: str = b64decode("JDJhJDEwJFhkNkhYT3dweFI1UTIvWGpyZjBkUC5hSDFaRDE5T3pRZC9mVnVNLk94QXJJL01DTlZtNHZh").decode(
     "utf-8")
 curse_client = CurseClient(API_KEY)
+curse_gameid = 432  # Minecraft
 
 if sys.platform == 'darwin':
     pointerhand = 'pointinghand'
-    base_path = Path('Library/Application Support/Modlist Manager')
+    '''base_path = Path('Library/Application Support/Modlist Manager')
     if not os.path.exists(base_path):
-        os.mkdir(base_path)
+        os.mkdir(base_path)'''
 else:
     pointerhand = 'hand2'
-    base_path = Path('.')
+base_path = Path('.')
 
 modlists_directory = base_path / 'modlists'
 modicons_directory = base_path / 'modicons'
@@ -110,24 +111,50 @@ class App(tk.Tk):
         self.heading.delete(0, 'end')
         self.heading.insert(0, new_heading)
 
-    def add_mod(self, slug: str, new: bool):
+    def add_mod(self, new: bool, slug="", string=""):
+        if slug == "" and string == "":
+            raise ValueError("Either slug or string must be provided")
         try:
+            print('start add')
             # Get curseforge mod
             search = curse_client.get_search()
-            search.slug = slug
-            curseforge_mod = CurseForgeMod(curse_client.search(432, search=search)[0])
-            modrinth_mod = ModrinthMod(slug)
+            if slug != "":
+                print('input is slug')
+                search.slug = slug
+            else:
+                print(f'input is name, {string}')
+                search.searchFilter = string
+                search.sortField = search.NAME
+                search.categoryId = 6 # Mods only
+                search = curse_client.search(curse_gameid, search=search)
+                print('search results:')
+                if len(search) == 0:
+                    print('None')
+                for i, mod in enumerate(search):
+                    print(i, mod.name)
+            curseforge_mod = CurseForgeMod(curse_client.search(curse_gameid, search=search)[0])
+            print(curseforge_mod.name)
+            # Get modrinth mod
+            if slug != "":
+                modrinth_mod = ModrinthMod(slug)
+            else:
+                # Faster to locate by using curseforge to find slug (makes modrinth only mods not show when searching by
+                # name). A limitation that is fine as the modrinth api is very slow at searching itself
+                print('up here')
+                modrinth_mod = ModrinthMod(curseforge_mod.slug)
 
             if curseforge_mod is not None:
                 # Prioritise modrinth naming convention
+                print(f'Curseforge found: {curseforge_mod.name}')
                 if modrinth_mod is not None:
                     curseforge_mod.name = modrinth_mod.name
                 new_mod = curseforge_mod
             elif modrinth_mod is not None:
+                print(f'Modrinth found: {modrinth_mod.name}')
                 new_mod = modrinth_mod
             # If both curseforge and modrinth fail, then raise exception
             else:
-                raise Exception(f'Mod {slug} not found')
+                raise ValueError(f'Mod {slug} not found')
 
             for mod in self.modlist:
                 if mod.mod_ref.name == new_mod.name:
@@ -199,7 +226,7 @@ def open_list(master):
                 else:
                     line = line.strip().split(', ')
                     for slug in line:
-                        master.add_mod(slug, False)
+                        master.add_mod(False, slug=slug)
             except Exception as e:
                 messagebox.showerror('File Format Error', f'{e}')
 
@@ -217,12 +244,12 @@ def save_list(master):
 
     if master.heading.get() == 'Untitled Modlist':
         if not messagebox.askyesno('Untitled Modlist', 'You haven\'t specified a title for the '
-                                                       'modlist.\nDo you want to continue?'):
+                                                       'modlist. Do you want to continue?'):
             return False
 
     list_name = master.heading.get()
     if os.path.exists(modlists_directory / f'{list_name}.txt'):
-        if not messagebox.askyesno('Existing Modlist', 'An existing modlist has the same title!\nDo '
+        if not messagebox.askyesno('Existing Modlist', 'An existing modlist has the same title! Do '
                                                        'you want to override the existing modlist?'):
             return False
         os.remove(modlists_directory / f'{list_name}.txt')
@@ -303,7 +330,7 @@ def download_list(master, mcversion: str, modloader: str):
     if modloader == 'fabric' and not fabric_api:
         search = curse_client.get_search()
         search.slug = 'fabric-api'
-        fabric_api_mod = CurseForgeMod(curse_client.search(432, search=search)[0])
+        fabric_api_mod = CurseForgeMod(curse_client.search(curse_gameid, search=search)[0])
         fabric_api_mod.get_icon()
         master.modlist.append(Mod(master.container.list, fabric_api_mod, len(master.modlist)))
         fabric_api_mod.download_mod(master, mods_directory, mcversion, modloader)
@@ -535,22 +562,31 @@ class Tools(ttk.Frame):
 
 
 def mod_window_open(master):
-    AddModWindow(master, 'Enter CurseForge or Modrinth URL', (1000, 50))
+    AddModWindow(master, 'Enter a Mod Name or CurseForge/Modrinth Mod URL', (1000, 50))
 
 
-def mod_window_input(window, url: str):
+def mod_window_input(window, input: str):
+    slug = None
     try:
-        if url[:25] == 'https://modrinth.com/mod/':
-            slug = url[25:].split('/', 1)[0]
-        elif url[:45] == 'https://www.curseforge.com/minecraft/mc-mods/':
-            slug = url[45:].split('/', 1)[0]
+        if re.search('https', input):
+            slug = ""
+            if input[:25] == 'https://modrinth.com/mod/':
+                slug = input[25:].split('/', 1)[0]
+            elif input[:45] == 'https://www.curseforge.com/minecraft/mc-mods/':
+                slug = input[45:].split('/', 1)[0]
+            if slug is not None:
+                window.master.add_mod(True, slug=slug)
+            else:
+                raise ValueError
         else:
-            messagebox.showerror(title='URL Error', message=f'URL doesn\'t contain valid mod')
-            return
-        window.master.add_mod(slug, True)
+            window.master.add_mod(True, string=input)
+
         window.destroy()
     except ValueError as e:
-        messagebox.showerror(title='Unknown URL Type', message=f'Input cannot be parsed as URL!\n{e}')
+        if slug is not None:
+            messagebox.showerror(title='Unknown Mod URL', message=f'Input cannot be parsed as URL! {e}')
+        else:
+            messagebox.showerror(title='Unknown Mod Name', message=f'Mod search produced no results! {e}')
 
 
 def find(master, string: str):
@@ -872,9 +908,9 @@ class AddModWindow(tk.Toplevel):
         ttk.Frame(self, width=10).pack(side='left', pady=5)
         # mod url entry
         ent_url = ttk.Entry(self, width=63, font=('Helvetica', 20))
-        ent_url.insert(0, 'Enter URL for Mod...')
+        ent_url.insert(0, 'Enter Mod Name or URL...')
         ent_url.bind('<FocusIn>',
-                     lambda args: ent_url.get() == 'Enter URL for Mod...' and ent_url.delete(0, 'end'))
+                     lambda args: ent_url.get() == 'Enter Mod Name or URL...' and ent_url.delete(0, 'end'))
         ent_url.bind('<FocusOut>',
                      lambda args: ent_url.get() == '' and ent_url.insert(0, 'Enter URL for Mod...'))
         ent_url.bind('<Return>', lambda args: mod_window_input(self, ent_url.get()))
