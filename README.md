@@ -24,16 +24,17 @@ managing your modlists and instead increasing your time enjoying Minecraft!
 2. Download the suitable installer for your operating system,<br>Windows: ***.msi***<br>Mac: ***.dmg***
 3. Run the installer, follow its prompts, open the application and violà!
 
+**Note for Windows:**
+When saving, the modlists are stored in the 'modlists' directory within the installation directory. If you remove/update the application,
+make sure to keep a backup of those .txt files, otherwise, your modlists will be lost to the eternal pit of being 
+overridden.
+
 **Note for Mac:** Currently (v0.3), the application cannot be opened normally from its icon. I will try to fix this, but
 a quick workaround to open the application is with these steps:
 1. Locate the application in your *'applications'* folder and right-click to open the context menu.
 2. Within the context menu, click *'Show Package Content'*
 3. Open these folders: *'Contents'*, then *'MacOS'*
 4. Then run the *'Modlist Manager'* with the exec icon and violà!
-## Usage
-When saving, the modlists are stored in .txt files within the 'modlists' folder. If you remove/update the application,
-make sure to keep a backup of those .txt files, otherwise, your modlists will be lost to the eternal pit of being 
-overridden.
 ## Contributing
 As of right now, I'm not actively expanding the projects features. However, if you have a suggestion, feel free to post
 it in this GitHub repository. I will do my best to respond and implement your ideas. If you find a bug, let me know and
