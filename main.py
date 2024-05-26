@@ -50,12 +50,12 @@ curse_gameid = 432  # Minecraft
 
 if sys.platform == 'darwin':
     pointerhand = 'pointinghand'
-    '''base_path = Path('Library/Application Support/Modlist Manager')
+    base_path = Path('Library/Application Support/Modlist Manager')
     if not os.path.exists(base_path):
-        os.mkdir(base_path)'''
+        os.mkdir(base_path)
 else:
     pointerhand = 'hand2'
-base_path = Path('.')
+    base_path = Path('.')
 
 modlists_directory = base_path / 'modlists'
 modicons_directory = base_path / 'modicons'
@@ -115,42 +115,32 @@ class App(tk.Tk):
         if slug == "" and string == "":
             raise ValueError("Either slug or string must be provided")
         try:
-            print('start add')
             # Get curseforge mod
             search = curse_client.get_search()
             if slug != "":
-                print('input is slug')
                 search.slug = slug
             else:
-                print(f'input is name, {string}')
+                '''
                 search.searchFilter = string
-                search.sortField = search.NAME
-                search.categoryId = 6 # Mods only
-                search = curse_client.search(curse_gameid, search=search)
-                print('search results:')
-                if len(search) == 0:
-                    print('None')
-                for i, mod in enumerate(search):
-                    print(i, mod.name)
+                search.sortField =  # This is F***ed due to not being able to sort via relevance
+                search.rootCategoryId = 6  # Mods only
+                '''
             curseforge_mod = CurseForgeMod(curse_client.search(curse_gameid, search=search)[0])
-            print(curseforge_mod.name)
+
             # Get modrinth mod
             if slug != "":
                 modrinth_mod = ModrinthMod(slug)
             else:
                 # Faster to locate by using curseforge to find slug (makes modrinth only mods not show when searching by
                 # name). A limitation that is fine as the modrinth api is very slow at searching itself
-                print('up here')
                 modrinth_mod = ModrinthMod(curseforge_mod.slug)
 
             if curseforge_mod is not None:
                 # Prioritise modrinth naming convention
-                print(f'Curseforge found: {curseforge_mod.name}')
                 if modrinth_mod is not None:
                     curseforge_mod.name = modrinth_mod.name
                 new_mod = curseforge_mod
             elif modrinth_mod is not None:
-                print(f'Modrinth found: {modrinth_mod.name}')
                 new_mod = modrinth_mod
             # If both curseforge and modrinth fail, then raise exception
             else:
@@ -188,7 +178,6 @@ def unsaved_dialog(master) -> bool:
 def get_mod_icon(mod, icon_url):
     if os.path.exists(modicons_directory / f'{mod.name}.png'):
         return
-    print(f'Getting icon for {mod.name}')
     try:
         urlretrieve(icon_url, modicons_directory / f'{mod.name}.png')
     except Exception as e:
@@ -297,7 +286,6 @@ def get_mod_directory(master, mcversion: str, modloader: str):
     if not os.path.exists(mods_directory):
         os.mkdir(mods_directory)
 
-    print(mods_directory)
     return mods_directory
 
 
@@ -562,7 +550,7 @@ class Tools(ttk.Frame):
 
 
 def mod_window_open(master):
-    AddModWindow(master, 'Enter a Mod Name or CurseForge/Modrinth Mod URL', (1000, 50))
+    AddModWindow(master, 'Enter a valid CurseForge or Modrinth Mod URL', (1000, 50))
 
 
 def mod_window_input(window, input: str):
@@ -579,7 +567,9 @@ def mod_window_input(window, input: str):
             else:
                 raise ValueError
         else:
-            window.master.add_mod(True, string=input)
+            # window.master.add_mod(True, string=input)
+            # Functionality that doesn't seem to cooperate, issue is specified in add_mod()
+            raise ValueError
 
         window.destroy()
     except ValueError as e:
@@ -786,11 +776,8 @@ class CurseForgeMod(cursepy.wrapper.base.CurseAddon):
         get_mod_icon(self, self.attachments[0].url)
 
     def download_mod(self, master, mods_directory, mcversion, modloader) -> bool:
-        print(f'Download CurseForge Mod: {self.name}')
         for file in self.addon.files():
-            print(f'Version: {file.version}')
             if file.file_status == file.RELEASED and mcversion in file.version and modloader in [version.lower() for version in file.version]:
-                print(f'Chosen Version: {file.display_name}')
                 self.download_version(mods_directory, file)
                 self.check_dependencies(master, file)
                 return True
@@ -798,7 +785,6 @@ class CurseForgeMod(cursepy.wrapper.base.CurseAddon):
             return False
 
     def download_version(self, mods_directory, version):
-        print(f'Downloading {version.file_name}')
         file_url = version.download_url
         urlretrieve(file_url, mods_directory / version.file_name)
 
@@ -806,7 +792,6 @@ class CurseForgeMod(cursepy.wrapper.base.CurseAddon):
         for dependency in version.dependencies:
             if dependency.type == dependency.REQUIRED:
                 dependency_mod = CurseForgeMod(curse_client.addon(dependency.addon_id))
-                print(f' > {dependency_mod.name}')
                 for mod in master.modlist:
                     if mod.mod_ref.name == dependency_mod.name:
                         break
@@ -817,7 +802,6 @@ class CurseForgeMod(cursepy.wrapper.base.CurseAddon):
     def compatible(self, master, mcversion, modloader):
         for file in self.addon.files():
             # Correct mcversion and modloader
-            print(f'Version: {file.version}')
             if mcversion in file.version and modloader in [version.lower() for version in file.version]:
                 self.check_dependencies(master, file)
                 return True
@@ -837,20 +821,16 @@ class ModrinthMod(modrinth.Projects.ModrinthProject):
         get_mod_icon(self, self.iconURL)
 
     def download_mod(self, master, mods_directory, mcversion, modloader):
-        print(f'Download Modrinth Mod: {self.name}')
         for version_id in reversed(self.versions):
             version = self.getVersion(version_id)
-            print(f'Version: {version.gameVersions}, {version.loaders}')
 
             if mcversion in version.gameVersions and modloader in version.loaders:
-                print(f'Chosen Version: {version.name}')
                 self.download_version(mods_directory, version)
                 self.check_dependencies(master, version)
                 break
 
     def download_version(self, mods_directory, version):
         file_name = self.slug + '-' + version.name + '.jar'
-        print(f'Downloading {file_name}')
         file_hash = version.getFiles()[0]
         file_url = version.getDownload(file_hash)
         urlretrieve(file_url, mods_directory / file_name)
@@ -859,7 +839,6 @@ class ModrinthMod(modrinth.Projects.ModrinthProject):
         for dependency in version.dependencies:
             if dependency['dependency_type'] == 'required':
                 dependency_mod = ModrinthMod(dependency['project_id'])
-                print(f' > {dependency_mod.name}')
                 for mod in master.modlist:
                     if mod.mod_ref.name == dependency_mod.name:
                         break
@@ -908,14 +887,15 @@ class AddModWindow(tk.Toplevel):
         ttk.Frame(self, width=10).pack(side='left', pady=5)
         # mod url entry
         ent_url = ttk.Entry(self, width=63, font=('Helvetica', 20))
-        ent_url.insert(0, 'Enter Mod Name or URL...')
+        ent_url.insert(0, 'Enter Mod URL...')
         ent_url.bind('<FocusIn>',
-                     lambda args: ent_url.get() == 'Enter Mod Name or URL...' and ent_url.delete(0, 'end'))
+                     lambda args: ent_url.get() == 'Enter Mod URL...' and ent_url.delete(0, 'end'))
         ent_url.bind('<FocusOut>',
-                     lambda args: ent_url.get() == '' and ent_url.insert(0, 'Enter URL for Mod...'))
+                     lambda args: ent_url.get() == '' and ent_url.insert(0, 'Enter Mod URL...'))
         ent_url.bind('<Return>', lambda args: mod_window_input(self, ent_url.get()))
         ent_url.bind('<BackSpace>', lambda args: ent_url.delete(0, 'end'))
         ent_url.pack(side='left', pady=5)
+        ent_url.focus_set()
 
 
 def open_webview(url: str):
