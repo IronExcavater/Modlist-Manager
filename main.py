@@ -43,14 +43,14 @@ modloaders = (
     'Fabric', 'Forge', 'Quilt', 'NeoForge'
 )
 
-API_KEY: str = b64decode("JDJhJDEwJFhkNkhYT3dweFI1UTIvWGpyZjBkUC5hSDFaRDE5T3pRZC9mVnVNLk94QXJJL01DTlZtNHZh").decode(
-    "utf-8")
-curse_client = CurseClient(API_KEY)
+# API_KEY: str = b64decode("JDJhJDEwJFhkNkhYT3dweFI1UTIvWGpyZjBkUC5hSDFaRDE5T3pRZC9mVnVNLk94QXJJL01DTlZtNHZh").decode("utf-8")
+curse_client = None
 curse_gameid = 432  # Minecraft
 
 if sys.platform == 'darwin':
     pointerhand = 'pointinghand'
-    base_path = Path('Library/Application Support/Modlist Manager')
+    #base_path = Path('Library/Application Support/Modlist Manager')
+    base_path = Path('.')
     if not os.path.exists(base_path):
         os.mkdir(base_path)
 else:
@@ -112,6 +112,9 @@ class App(tk.Tk):
         self.heading.insert(0, new_heading)
 
     def add_mod(self, new: bool, slug="", string=""):
+        if curse_client is None:
+            api_key_window_open(self)
+
         if slug == "" and string == "":
             raise ValueError("Either slug or string must be provided")
         try:
@@ -208,7 +211,11 @@ def open_list(master):
         master.update_heading(filepath.split('/')[-1].split('.')[0])
         for i, line in enumerate(f):
             try:
-                if line.lower().startswith('options: '):
+                if line.lower().startswith('cursekey: '):
+                    line = line.strip().split(': ')[-1]
+                    global curse_client
+                    curse_client = CurseClient(b64decode(line).decode('utf-8'))
+                elif line.lower().startswith('options: '):
                     line = line.strip().split(': ')[-1].split(', ')
                     master.footer.cbx_version.current(mcversions.index(line[0]))
                     master.footer.cbx_loader.current([loader.lower() for loader in modloaders].index(line[1].lower()))
@@ -218,6 +225,9 @@ def open_list(master):
                         master.add_mod(False, slug=slug)
             except Exception as e:
                 messagebox.showerror('File Format Error', f'{e}')
+
+        if curse_client is None:
+            api_key_window_open(master)
 
 
 def clear_list(master):
@@ -245,6 +255,7 @@ def save_list(master):
 
     with open(modlists_directory / f'{list_name}.txt', 'a') as f:
         master.modlist.sort(key=lambda args: args.mod_ref.name)
+        f.write(f'CurseKey: {curse_client.curse_api_key}\n')
         f.write(f'Options: {master.footer.cbx_version.get()}, {master.footer.cbx_loader.get().lower()}\n')
         line = ''
         for mod in master.modlist:
@@ -777,7 +788,9 @@ class CurseForgeMod(cursepy.wrapper.base.CurseAddon):
 
     def download_mod(self, master, mods_directory, mcversion, modloader) -> bool:
         for file in self.addon.files():
-            if file.file_status == file.RELEASED and mcversion in file.version and modloader in [version.lower() for version in file.version]:
+            if file.file_status == file.RELEASED and mcversion in file.version and modloader in [version.lower() for
+                                                                                                 version in
+                                                                                                 file.version]:
                 self.download_version(mods_directory, file)
                 self.check_dependencies(master, file)
                 return True
@@ -896,6 +909,57 @@ class AddModWindow(tk.Toplevel):
         ent_url.bind('<BackSpace>', lambda args: ent_url.delete(0, 'end'))
         ent_url.pack(side='left', pady=5)
         ent_url.focus_set()
+
+
+class AddKeyWindow(tk.Toplevel):
+    def __init__(self, master, title: str, size: tuple):
+        # main setup
+        super().__init__(master)
+        self.title(title)
+        self.geometry(f'{size[0]}x{size[1]}')
+        self.minsize(size[0], size[1])
+        self.maxsize(size[0], size[1])
+
+        self.create_widgets()
+
+        self.grab_set()
+        self.transient(master)
+        master.wait_window(self)
+
+    def create_widgets(self):
+        # curseforge api key webview button
+        btn_webview = ttk.Button(self, text='Apply for CurseForge API Key',
+                                 command=lambda: open_webview(
+                                     'https://support.curseforge.com/en/support/solutions/articles/9000208346-about-the-curseforge-api-and-how-to-apply-for-a-key'))
+        btn_webview.pack(side='left', padx=10, pady=5)
+
+        ttk.Frame(self, width=10).pack(side='left', pady=5)
+
+        # mod url entry
+        ent_key = ttk.Entry(self, width=63, font=('Helvetica', 20))
+        ent_key.insert(0, 'Enter Curseforge API Key...')
+        ent_key.bind('<FocusIn>',
+                     lambda args: ent_key.get() == 'Enter Curseforge API Key...' and ent_key.delete(0, 'end'))
+        ent_key.bind('<FocusOut>',
+                     lambda args: ent_key.get() == '' and ent_key.insert(0, 'Enter Curseforge API Key...'))
+        ent_key.bind('<Return>', lambda args: api_key_window_input(self, ent_key.get()))
+        ent_key.bind('<BackSpace>', lambda args: ent_key.delete(0, 'end'))
+        ent_key.pack(side='left', pady=5)
+        ent_key.focus_set()
+
+
+def api_key_window_open(master):
+    AddKeyWindow(master, 'Enter a valid CurseForge API Key', (1000, 50))
+
+
+def api_key_window_input(window, api_key):
+    global curse_client
+    curse_client = CurseClient(b64decode(api_key).decode('utf-8'))
+    try:
+        curse_client.games()
+        window.destroy()
+    except Exception as e:
+        pass
 
 
 def open_webview(url: str):
